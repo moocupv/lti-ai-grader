@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Loading evaluator...</title>
+    <script>
+        // ⚙️ original config
+        const CONFIG = {
+            title: "C1 Writing",
+			allowedOrigins: ['https://youropenedx.es', 'https://studio.youropenedx.es'],
+            lang: 'en',
+            taskHTML: `
+                <h2>Instructions</h2>
+				<p>Please enter the text of the task description and your solution following the template.</p>
+				`,
+            initialValue: "####TASK\n\nTask description text\n\n####ANSWER\n\nYour answer",
+            placeholder: "Type your text here...",
+            evaluatorUrl: './cgi-bin/evaluate-certacles-writing-c1-LTI-conf.py',
+            privacyUrl: "./evaluator_privacy_policy_Certacles_C1.html",
+            debug: false
+        };
+    </script>
+    <script src="./aigrader.js" defer></script>
+</head>
+<body>
+    <div id="app-root">Loading evaluation system...</div>
+</body>
+</html>
