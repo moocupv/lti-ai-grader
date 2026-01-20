@@ -2,25 +2,25 @@
 # -*- coding: utf-8 -*-
 import os
 # =================================================================
-# 🚀 CARGADOR DE VARIABLES DE ENTORNO (.env) EN EL MISMO DIRECTORIO
-# =================================================================
+# 🚀ENVIRONMENT VARIABLE (.env) LOADER  
+=================================================================
 def load_env_file(filepath=".env"):
     if os.path.exists(filepath):
         with open(filepath, "r") as f:
             for line in f:
                 line = line.strip()
-                # Ignorar líneas vacías o comentarios
+                # Ignore comments and empty lines
                 if not line or line.startswith("#"):
                     continue
-                # Separar por el primer '=' encontrado
+                # Split by first '='
                 if "=" in line:
                     key, value = line.split("=", 1)
-                    # Quitar posibles comillas
+                    # Remove "
                     value = value.strip().strip('"').strip("'")
                     os.environ[key.strip()] = value
 
-# Intentamos cargar el archivo .env antes de definir CONFIG
-load_env_file()
+# Load  .env file before defining  CONFIG
+load_env_file("/var/secure/.env") #Locate  .env in the folder created for sessions or in any other (for example user home) that is not web accesible
 
 # ==========================================
 # ⚙️ GRADER SPECIFIC CONFIGURATION
