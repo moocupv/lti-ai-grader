@@ -1,6 +1,27 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+# =================================================================
+# 🚀 CARGADOR DE VARIABLES DE ENTORNO (.env) EN EL MISMO DIRECTORIO
+# =================================================================
+def load_env_file(filepath=".env"):
+    if os.path.exists(filepath):
+        with open(filepath, "r") as f:
+            for line in f:
+                line = line.strip()
+                # Ignorar líneas vacías o comentarios
+                if not line or line.startswith("#"):
+                    continue
+                # Separar por el primer '=' encontrado
+                if "=" in line:
+                    key, value = line.split("=", 1)
+                    # Quitar posibles comillas
+                    value = value.strip().strip('"').strip("'")
+                    os.environ[key.strip()] = value
+
+# Intentamos cargar el archivo .env antes de definir CONFIG
+load_env_file()
+
 # ==========================================
 # ⚙️ GRADER SPECIFIC CONFIGURATION
 # ==========================================
