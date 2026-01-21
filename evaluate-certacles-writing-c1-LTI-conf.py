@@ -3,7 +3,7 @@
 import os
 # =================================================================
 # 🚀ENVIRONMENT VARIABLE (.env) LOADER  
-=================================================================
+#=================================================================
 def load_env_file(filepath=".env"):
     if os.path.exists(filepath):
         with open(filepath, "r") as f:
