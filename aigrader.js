@@ -1,10 +1,9 @@
 /**
  * 🛠️ AIGRADER ENGINE v2.6
- * Diseño, Lógica, Seguridad e Idiomas centralizados.
  */
 
 const EvaluatorEngine = {
-    // 🌎 DICCIONARIO DE IDIOMAS
+    // 🌎 LANGUAGE DICTIONARY
     i18n: {
         en: {
             ltiConnected: "🔗 <strong>LTI Mode:</strong> Your grade will be sent to the platform.",
@@ -50,7 +49,7 @@ const EvaluatorEngine = {
         }
     },
 
-    // 🎨 PLANTILLA DE DISEÑO ÚNICA
+    // 🎨 TEMPLATE
     getTemplate() {
         return `
         <style>
@@ -96,24 +95,24 @@ const EvaluatorEngine = {
     },
 
     init() {
-        // 1. Inyectar HTML inmediatamente
+        // 1. Inject HTML inmediately
         const root = document.getElementById('app-root');
         if (!root) return;
         root.innerHTML = this.getTemplate();
 
-        // 2. Detectar idioma
+        // 2. Language detection
         const browserLang = navigator.language.split('-')[0];
         this.lang = CONFIG.lang || (this.i18n[browserLang] ? browserLang : 'en');
         this.txt = this.i18n[this.lang];
 
-        // 3. Capturar Token (URL > SessionStorage > LocalStorage)
+        // 3. Token capture (URL > SessionStorage > LocalStorage)
         const urlParams = new URLSearchParams(window.location.search);
         this.token = urlParams.get('token') || sessionStorage.getItem('lti_session_token') || localStorage.getItem('lti_session_token');
 
         const mode = urlParams.get('mode') || localStorage.getItem('lti_mode') || 'standalone';
         this.isLTI = (mode === 'lti' && !!this.token);
 
-        // Guardar para persistencia
+        // Persistence storing
         if (this.token) {
             sessionStorage.setItem('lti_session_token', this.token);
             localStorage.setItem('lti_session_token', this.token);
@@ -152,12 +151,12 @@ const EvaluatorEngine = {
     },
 
     bindEvents() {
-        // Manejador del Formulario
+        // Form handler
         document.getElementById('evaluation-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             const text = document.getElementById('student-input').value.trim();
             if (!text) return alert(this.txt.emptyError);
-            // Usamos el valor guardado o el inicial de CONFIG si no ha habido mensaje del padre
+            // We use the stored valuen or the initial CONFIG if no message from parent page
             const templateToCompare = this.currentValueFromLMS || CONFIG.initialValue;
             
 			
@@ -189,22 +188,22 @@ const EvaluatorEngine = {
             }
         });
 
-        // ✅ Manejador del Botón Nueva Evaluación (Corregido)
+        // ✅ New Evaluation button handler
         document.getElementById('new-eval-btn').addEventListener('click', () => {
-            // 1. Ocultar feedback y botón de reset
+            // 1. Hide feedback and reset button
             document.getElementById('feedback').style.display = 'none';
             document.getElementById('new-eval-section').style.display = 'none';
             
-            // 2. Restaurar valor inicial
+            // 2. Initial value reset
             document.getElementById('student-input').value = CONFIG.initialValue;
             
-            // 3. Scroll al principio
+            // 3. Scroll to top
             window.scrollTo({ top: 0, behavior: 'smooth' });
 
-            // 4. Solicitar re-sincronización al padre
+            // 4. Ask for re-synchronization to parent page
             window.parent.postMessage({ accion: 'hijo_listo' }, '*');
             
-            if (CONFIG.debug) console.log("Nueva evaluación iniciada: solicitando re-sincronización al padre.");
+            if (CONFIG.debug) console.log("New evaluation started: asking for parent re-synchronization.");
         });
     },
 
@@ -225,15 +224,15 @@ const EvaluatorEngine = {
     },
 
 	setupPostMessage() {
-        // 1. Obtener dominios autorizados desde CONFIG (o fallback seguro)
-        const allowed = CONFIG.allowedOrigins || ['https://upvx.es', 'https://studio.upvx.es'];
+        // 1. Get allowed domains from CONFIG (with safe fallback)
+        const allowed = CONFIG.allowedOrigins || ['https://youropenedx.es', 'https://studio.youropenedx.es'];
         
-        // 2. Avisar al padre (LMS)
+        // 2. Notify to parent page (LMS)
         window.parent.postMessage({ accion: 'hijo_listo' }, '*');
 
-        // 3. Escuchar mensajes con validación dinámica
+        // 3. Listen messages with dynamic validation
         window.addEventListener("message", (event) => {
-            // ✅ Comprobamos si el origen del mensaje está en nuestra lista blanca
+            // ✅ Check if message origin is in our whitelist
             const isAuthorized = allowed.some(origin => event.origin.startsWith(origin));
             
             if (!isAuthorized) {
@@ -253,9 +252,10 @@ const EvaluatorEngine = {
     }
 };
 
-// 🚀 LANZAMIENTO SEGURO
+// 🚀 SAFE LAUNCH
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => EvaluatorEngine.init());
 } else {
     EvaluatorEngine.init();
 }
+
