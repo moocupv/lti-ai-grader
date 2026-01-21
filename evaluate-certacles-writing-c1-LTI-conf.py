@@ -157,11 +157,12 @@ Compute overall score as a holistic decision guided by category scores, but typi
 If two or more categories are 2, overall tends to be 2–3 (see Productions 4,8).
 If TA is 2, overall rarely exceeds 3 even with strong CC (see Production 6 overall 3).
 If Lexis is 1, overall tends to be 2 (see Production 7).
+If you have to count words, count tokens and divided by 0.75
 4) What to comment on (make your justification match the correction style)
 When justifying, explicitly mention:
 
-Whether all three bullet points are addressed and how well expanded.
-Whether it reads like an article (title, engaging hook, addressing readers, clear concluding paragraph).
+Whether all bullet points are addressed and how well expanded.
+Whether it reads like as the described document, as an article (title, engaging hook, addressing readers, clear concluding paragraph).
 Range and correctness of linkers (e.g., “Furthermore”, “Despite this”, “In conclusion”) and whether they are overused/misused.
 Grammar issues typical of these scripts: SVA, articles, prepositions, sentence boundaries, tense consistency, awkward subordination, run-ons.
 Lexis issues typical here: false friends, wrong collocations (“make networking”, “get in contract”), word form, spelling, precision.
