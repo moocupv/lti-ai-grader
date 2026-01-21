@@ -20,7 +20,7 @@ def load_env_file(filepath=".env"):
                     os.environ[key.strip()] = value
 
 # Load  .env file before defining  CONFIG
-load_env_file("/var/secure/.env") #Locate  .env in the folder created for sessions or in any other (for example user home) that is not web accesible
+load_env_file("/var/secure/aigrader.env") #Locate  .env in the folder created for sessions or in any other (for example user home) that is not web accesible
 
 # ==========================================
 # ⚙️ GRADER SPECIFIC CONFIGURATION
