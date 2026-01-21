@@ -1,0 +1,46 @@
+<!-- If you want to change the task description from open edx, you have to add this to an html component situated before the LTI component in the same unit -->
+<p>
+<script>
+(function() {
+    // We define the task in plain text
+    const enunciadoTarea = `WRITING TASK 2
+
+You are taking part in a study abroad programme at a European University. The International office of your University has asked you to write a report on your stay in order to improve the programme. You spoke to some of your fellow students and took some notes to help you:
+
+PROS of the UNI:
+- international students (interesting!)
+- good programmes (good for CV!)
+- language programmes
+
+CONS of the UNI:
+- expensive (limited grants)
+- Exams (too different!)
+- language barrier
+
+You should look at your notes and:
+● Discuss what aspects of the University make it a good destination for International students.
+● Explain what problems students might encounter during their stay.
+● Suggest what advice the University should give to students taking part in the study abroad programme in the future.
+
+Write your report in 200-240 words.`;
+
+    // Format the template with the same structure as the one defined in the AI grader
+    const plantillaCompleta = `####TASK\n\n${enunciadoTarea}\n\n####ANSWER\n\n`;
+
+    window.addEventListener("message", function(event) {
+        // Domain filter
+        if (!event.origin.includes('yourdomain.com')) return;
+
+        if (event.data.accion === 'hijo_listo') {
+            const iframes = document.querySelectorAll('iframe');
+            iframes.forEach(f => {
+                f.contentWindow.postMessage({
+                    accion: 'rellenar_estudiante',
+                    texto: plantillaCompleta
+                }, '*');
+            });
+        }
+    }, false);
+})();
+</script>
+</p>
