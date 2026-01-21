@@ -32,20 +32,22 @@ fi
 # 4. Set ownership and strict permissions
 echo "🔑 Setting permissions for user: $WEB_USER..."
 
-# Secure folder and .env file
-sudo chown -R $WEB_USER:$WEB_USER "$SECURE_DIR"
-sudo chmod 700 "$SECURE_DIR"               # Only www-data can enter /var/secure
-sudo chmod 600 "$SECURE_DIR/.env"          # Only www-data can read the .env file
-sudo chmod -R 770 "$SESSION_DIR"           # Read/Write access for the web user
+# www-data writes in lti_sessions to create tokens
+sudo chown www-data:www-data /var/secure/lti_sessions/
+sudo chmod 770 /var/secure/lti_sessions/
 
-# CGI Scripts
-echo "📜 Ensuring execution rights for scripts in $CGI_DIR..."
-sudo chown -R $WEB_USER:$WEB_USER "$CGI_DIR"
-sudo chmod +x "$CGI_DIR"/*.py
+# only root edits env file , www-data only reads
+sudo chown root:www-data /var/secure/aigrader.env
+sudo chmod 640 /var/secure/aigrader.env
+
+# CGI Scripts: only root edits scripts, www-data only runs them 
+sudo chown root:www-data /usr/lib/cgi-bin/*.py
+sudo chmod 755 /usr/lib/cgi-bin/*.py
 
 # 5. Enable and start fcgiwrap service
 echo "⚙️  Starting fcgiwrap service..."
 sudo systemctl enable fcgiwrap
 sudo systemctl restart fcgiwrap
 
+echo "You must also add the cgi-bin configuration in Nginx configuration file"
 echo "✨ Done! Nginx environment is now prepared and secure."
