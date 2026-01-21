@@ -17,7 +17,7 @@ import uuid
 import io
 from urllib.parse import urlparse
 
-# Forzamos UTF-8 para evitar errores de formato con rúbricas largas
+# Enforce UTF-8 to prevent formatting errors with long rubrics.
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
 def setup_environment(debug_mode):
@@ -33,19 +33,19 @@ def log_debug(message, config):
 def is_safe_url(url, allowed_domains_str):
     try:
         if not url: return False, "URL vacía"
-        base_url = config.get("BASE_URL", "https://upvx.es").rstrip('/')
+        base_url = config.get("BASE_URL", "https://yourlms.es").rstrip('/')
         if url.startswith('/'):
             url = base_url + url
         parsed_url = urlparse(url)
         if parsed_url.scheme != 'https':
-            return False, "Solo se permiten conexiones HTTPS"
+            return False, "Only HTTPS connections"
         allowed_list = [d.strip().lower() for d in allowed_domains_str.split(",")]
         domain = parsed_url.netloc.lower()
         if any(domain == d or domain.endswith('.' + d) for d in allowed_list):
             return True, url
-        return False, f"Dominio no autorizado: {domain}"
+        return False, f"Non authorised domain: {domain}"
     except Exception:
-        return False, "Error al procesar la URL"
+        return False, "Error in URL processing"
 
 def extract_flexible_grade(text, grade_identifier):
     try:
@@ -100,7 +100,7 @@ def call_ai_api(student_input, config):
     provider = config.get("provider", "openai").lower()
     try:
         if provider == "openai":
-            url = config.get("api_url", "https://api.poligpt.upv.es").rstrip('/')
+            url = config.get("api_url", "https://api.openai.com").rstrip('/')
             if "/chat/completions" not in url:
                 url += "/v1/chat/completions"
 
@@ -203,3 +203,4 @@ def run(config):
         sys.stdout.write(json.dumps({'success': False, 'error': str(e)}))
 
     sys.stdout.flush()
+
