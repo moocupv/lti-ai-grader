@@ -179,8 +179,8 @@ CONFIG = {
 It is possible to dynamically override the task instructions (`taskHTML`) and the `initialValue` template without modifying the shared HTML file. This allows you to **reuse the same LTI tool and exam interface** across different Open edX units while grading entirely different prompts.
 
 To achieve this:
-1.  In Open edX, place a **Text component** in the unit immediately **before** the LTI component.
-2.  In the HTML editor of that text component, include a JavaScript function that overrides the global configuration variables of the grader.
+1.  In Open edX, place a **Text component** in the unit immediately **before** the LTI component. Usually the task is defined in this component in html
+2.  In the HTML editor of that text component, include a JavaScript function that overrides the global configuration variables of the grader with the same definition but in plain text.
 3.  The repository includes a specific HTML file example demonstrating how to implement this script.
 
 This method enables high scalability, as a single deployment of the evaluator can handle a diverse range of specific writing tasks across an entire course.
