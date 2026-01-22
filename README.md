@@ -34,9 +34,7 @@ sudo chmod 770 /var/secure/lti_sessions/
 sudo chmod +x /usr/lib/cgi-bin/lti-receiver.py
 sudo chmod +x /usr/lib/cgi-bin/evaluate-certacles-writing-c1-LTI-conf.py
 sudo chmod +x /usr/lib/cgi-bin/aigrader.py
-
-Aquí tienes la segunda parte del documento, comenzando desde la configuración de Nginx, manteniendo el formato Markdown estrictamente dentro del bloque de código para evitar que el navegador lo interprete.
-
+```markdown
 ---
 
 ## 2. Server Configuration (Nginx)
