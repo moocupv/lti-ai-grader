@@ -34,3 +34,34 @@ sudo chmod 770 /var/secure/lti_sessions/
 sudo chmod +x /usr/lib/cgi-bin/lti-receiver.py
 sudo chmod +x /usr/lib/cgi-bin/evaluate-certacles-writing-c1-LTI-conf.py
 sudo chmod +x /usr/lib/cgi-bin/aigrader.py
+
+Aquí tienes la segunda parte del documento, comenzando desde la configuración de Nginx, manteniendo el formato Markdown estrictamente dentro del bloque de código para evitar que el navegador lo interprete.
+
+Markdown
+
+---
+
+## 2. Server Configuration (Nginx)
+
+When using Nginx, you must configure the cgi-bin section within a configuration file (.conf). 
+1. Files should be created in `/etc/nginx/sites-available/`.
+2. A symlink must then be created in `/etc/nginx/sites-enabled/` to activate the site.
+
+Add the following block to your configuration file:
+
+```nginx
+location /cgi-bin/ {
+    gzip off;
+    fastcgi_buffering off; # Required for real-time AI feedback
+
+    alias /usr/lib/cgi-bin/;
+    fastcgi_pass unix:/var/run/fcgiwrap.socket;
+    include fastcgi_params;
+
+    # Ensures 'alias' resolves the script path correctly
+    fastcgi_param SCRIPT_FILENAME $request_filename;
+
+    # Timeouts adjusted for LLM inference latency
+    fastcgi_read_timeout 180s;
+    fastcgi_send_timeout 180s;
+}
