@@ -58,7 +58,7 @@ location /cgi-bin/ {
     # We apply the zone defined at the beginning of the configuration file
     # burst=3 allows for a small excess of 3 calls in a burst
     # nodelay avoids long queues by processing or rejecting the calls inmediately
-    limit_req zone=mylimit burst=5 nodelay;
+    limit_req zone=mylimit burst=3 nodelay;
 
     gzip off;
     fastcgi_buffering off; # Required for real-time AI feedback
