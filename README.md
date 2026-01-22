@@ -122,6 +122,9 @@ evaluatorUrl: '/cgi-bin/evaluate-certacles-writing-c1-LTI-conf.py',
 privacyUrl: "/evaluator_privacy_policy_Certacles_C1.html",
 debug: false
 ```
+### In the aigrader.js file:
+Variables i18n with the different translations of the text components of the html page and Template with the web page template.
+
 ### In the Python (.py) file:
 ```python
 # Load .env file before defining CONFIG
