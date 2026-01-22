@@ -49,9 +49,9 @@ Add the following block to your configuration file:
 # If you want to limit by IP ($binary_remote_addr) to avoid excessive use
 # Add this and the first command of the cgi-bib section
 # 'mylimit' is the name of the zone, 10m are 10 Megabytes to store IPs
-# rate=1r/s means "1 call per second" (adjust if needed)
-# 429 is a different error "Too Many Requests"
-limit_req_zone $binary_remote_addr zone=mylimit:10m rate=1r/s;
+# rate=1r/s means "1 call per second" (it has been set to 1 call every 3 seconds adjust if needed)
+# 429 is a different error "Too Many Requests" so the caller can now the reason for the error
+limit_req_zone $binary_remote_addr zone=mylimit:10m rate=20r/m;
 limit_req_status 429;
 
 location /cgi-bin/ {
