@@ -46,7 +46,20 @@ When using Nginx, you must configure the cgi-bin section within a configuration 
 Add the following block to your configuration file:
 
 ```nginx
+# If you want to limit by IP ($binary_remote_addr) to avoid excessive use
+# Add this and the first command of the cgi-bib section
+# 'mylimit' is the name of the zone, 10m are 10 Megabytes to store IPs
+# rate=1r/s means "1 call per second" (adjust if needed)
+# 429 is a different error "Too Many Requests"
+limit_req_zone $binary_remote_addr zone=mylimit:10m rate=1r/s;
+limit_req_status 429;
+
 location /cgi-bin/ {
+    # We apply the zone defined at the beginning of the configuration file
+    # burst=3 allows for a small excess of 3 calls in a burst
+    # nodelay avoids long queues by processing or rejecting the calls inmediately
+    limit_req zone=mylimit burst=5 nodelay;
+
     gzip off;
     fastcgi_buffering off; # Required for real-time AI feedback
 
