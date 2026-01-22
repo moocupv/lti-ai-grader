@@ -34,7 +34,7 @@ sudo chmod 770 /var/secure/lti_sessions/
 sudo chmod +x /usr/lib/cgi-bin/lti-receiver.py
 sudo chmod +x /usr/lib/cgi-bin/evaluate-certacles-writing-c1-LTI-conf.py
 sudo chmod +x /usr/lib/cgi-bin/aigrader.py
-```markdown
+```
 ---
 
 ## 2. Server Configuration (Nginx)
