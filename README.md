@@ -61,3 +61,120 @@ location /cgi-bin/ {
     fastcgi_read_timeout 180s;
     fastcgi_send_timeout 180s;
 }
+```
+Aquí tienes el resto del documento desde ese punto exacto, manteniendo el formato de bloque de código para que puedas copiar el Markdown íntegro:
+
+Markdown
+
+* Validate the config with `nginx -t`.
+* Restart the service with `systemctl restart nginx`.
+
+---
+
+## 3. Launch Mechanism (The Entry Point)
+
+The system uses a highly flexible entry point. Instead of hardcoding which exam a student takes, the `lti-receiver.py` script acts as a data collector and session initializer.
+
+**Standard Launch URL Format:**
+`https://yourserver.com/cgi-bin/lti-receiver.py?file=/B2-writing-correction-LTI.html`
+
+**How it works:**
+* **LTI Parameter Gathering:** The `get_all_params()` function extracts all GET and POST data sent by the LMS (user IDs, outcome URLs, OAuth parameters).
+* **Session Initialization:** The script creates a secure JSON file in `/var/secure/lti_sessions/` containing these parameters.
+* **Dynamic Redirect:** After creating the session, the script reads the `?file=` parameter and redirects the student's browser to the specific HTML interface.
+* **CGI-bin Grading & LTI Return:** The HTML page contains a form that calls the grader configuration script (e.g., `evaluate-certacles-writing-c1-LTI-conf.py`). This script selects the model and prompt, executes the logic via `aigrader.py`, and finally **sends the AI-generated grades after checking the LTI shared secret**. The integrity of the LTI parameters is verified by the LMS at this final stage when the grade is submitted.
+
+---
+
+## 4. Security Audit and Best Practices
+
+### Security Filters included in Configuration:
+* **Path Traversal Protection:** Scripts use `os.path.basename()` and strict validation on the `?file=` parameter to ensure only authorized files within the web root are loaded, preventing access to sensitive system files like `/etc/passwd`.
+* **Session Integrity:** The evaluation script (`evaluate-certacles-writing-c1-LTI-conf.py`) will **refuse to run** unless it finds a valid token in `/var/secure/lti_sessions/`. This ensures the AI API can only be called after successful LMS authentication.
+* **CORS & Domain Whitelisting:** `CORS_ALLOWED_ORIGINS` and `LTI_ALLOWED_DOMAINS` restrict communication to trusted servers and LMS platforms.
+* **Environment Isolation:** Sensitive keys are loaded from `/var/secure/aigrader.env`, keeping them out of the web-accessible directory.
+
+---
+
+## 5. Configuration Options
+
+### In the HTML file:
+```javascript
+title: "C1 Writing",
+allowedOrigins: ['[https://youropenedx.es](https://youropenedx.es)', '[https://studio.youropenedx.es](https://studio.youropenedx.es)'],
+lang: 'en',
+taskHTML: `
+    <h2>Instructions</h2>
+    <p>Please enter the text of the task description and your solution following the template.</p>
+`,
+initialValue: "####TASK\n\nTask description text\n\n####ANSWER\n\nYour answer",
+placeholder: "Type your text here...",
+evaluatorUrl: '/cgi-bin/evaluate-certacles-writing-c1-LTI-conf.py',
+privacyUrl: "/evaluator_privacy_policy_Certacles_C1.html",
+debug: false
+```
+### In the Python (.py) file:
+```python
+# Load .env file before defining CONFIG
+load_env_file("/var/secure/aigrader.env") 
+
+CONFIG = {
+    "DEBUG": False,
+    "BASE_URL": "[https://mi-lms.com](https://mi-lms.com)", # Base URL for relative paths
+    "CORS_ALLOWED_ORIGINS": "[https://yourserver.com](https://yourserver.com)", #"[https://mi-lms.com](https://mi-lms.com), [https://otro-dominio.es](https://otro-dominio.es)" or "*" . With the url of the server where the scripts are located is enough.
+    "LTI_ALLOWED_DOMAINS": "yourlms.com, canvas.instructure.com",
+    "api_key": os.getenv("AI_GRADER_API_KEY_GOOGLE",""),
+    #"api_key": os.getenv("AI_GRADER_API_KEY_OPENAI",""),
+    "provider": "google", # Options: "google" o "openai"
+    "api_url": None,  # Optional for OpenAI compatible APIs (ej. Azure o Proxies). If None, uses the openai url.
+    "model_name": "gemini-2.5-flash-lite",
+    "grade_identifier": "FINAL_GRADE", # What parser is going to look for from the llm to get the grade (ej: FINAL_GRADE: 12/15), include its generation in prompt 
+    # ✅ LTI secrets (to be included in Moodle or Open EdX configuration)  
+    "lti_consumer_secrets": {
+        'openedx_key': os.getenv("LTI_OPENEDX_SECRET",""),
+        'moodle_key': os.getenv("LTI_MOODLE_SECRET",""),
+    },
+    "session_dir": '/var/secure/lti_sessions',
+    "send_grade_to_lms": True,
+    "system_instructions": """
+       PROMPT for the LLM
+    """
+}
+```
+Aquí tienes el tramo final del documento, desde la integración con Open edX hasta el final, en formato de bloque de código para que lo copies sin problemas:
+
+Markdown
+
+## 6. Open edX Integration
+
+1.  In the course, go to **Settings > Advanced Settings**.
+2.  In **Advanced modules lists**, add `lti_consumer`.
+3.  Look for **LTI passports** and add `LTI_KEY_NAME:LTI_SECRET`.
+4.  In a unit, select **Advanced** in **Add a new component** and select **LTI Consumer**.
+5.  Edit the component:
+    * **LTI ID:** Enter the `LTI_KEY_NAME` used in the passport.
+    * **LTI URL:** Enter the full URL pointing to `lti-receiver.py?file=...`.
+    * **LTI version:** 1.1/1.2.
+    * **Scored:** Set to `True` and define the points possible.
+
+---
+
+## 7. Deployment Checklist
+* [ ] Scripts placed in `/usr/lib/cgi-bin/` and made executable.
+* [ ] `.html` and `.js` files placed in `/var/www/html/`.
+* [ ] `/var/secure/aigrader.env` created with valid API keys and LTI secrets.
+* [ ] Nginx configured with the `cgi-bin` block and services restarted.
+* [ ] LTI component configured in the LMS with matching URL, Key, and Secret.
+
+---
+
+## 8. Dynamic Task Definition (Advanced Use)
+
+It is possible to dynamically override the task instructions (`taskHTML`) and the `initialValue` template without modifying the shared HTML file. This allows you to **reuse the same LTI tool and exam interface** across different Open edX units while grading entirely different prompts.
+
+To achieve this:
+1.  In Open edX, place a **Text component** in the unit immediately **before** the LTI component.
+2.  In the HTML editor of that text component, include a JavaScript function that overrides the global configuration variables of the grader.
+3.  The repository includes a specific HTML file example demonstrating how to implement this script.
+
+This method enables high scalability, as a single deployment of the evaluator can handle a diverse range of specific writing tasks across an entire course.
