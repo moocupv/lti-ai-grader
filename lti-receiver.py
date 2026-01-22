@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 #lti-receiver.py
 
-#URL example https://yourserver.com/cgi-bin/lti-receiver.py?file=/B2-writing-correction-LTI.html
+#URL example https://yourserver.com/cgi-bin/lti-receiver.py?file=/C1-writing-correction-LTI.html
 
 import cgi
 import cgitb
@@ -15,7 +15,7 @@ from urllib.parse import parse_qs
 
 # ⚙️ GLOBAL CONFIGURATION
 DEBUG = False
-REDIRECT_URL = '/B2-writing-correction-LTI.html' # Default destination
+REDIRECT_URL = '/C1-writing-correction-LTI.html' # Default destination
 SESSION_DIR = '/var/secure/lti_sessions'
 SESSION_TIMEOUT = 3600
 
@@ -149,12 +149,12 @@ def main():
     
     if validation['is_valid']:
         save_session(token, params)
-        status_class, msg, delay, mode = 'success', '✅ Sesión LTI creada', 1500, 'lti'
+        status_class, msg, delay, mode = 'success', '✅ LTI Session created', 1500, 'lti'
     elif validation['total'] > 0:
         save_session(token, params)
-        status_class, msg, delay, mode = 'warning', '⚠️ Sesión parcial creada', 2000, 'partial'
+        status_class, msg, delay, mode = 'warning', '⚠️ Partial session created', 2000, 'partial'
     else:
-        status_class, msg, delay, mode = 'error', '❌ Modo independiente', 2000, 'standalone'
+        status_class, msg, delay, mode = 'error', '❌ Standalone mode', 2000, 'standalone'
         token = None
 
     debug_css = "" if DEBUG else ".origin-debug { display: none; }"
