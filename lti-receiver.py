@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 #lti-receiver.py
 
-#URL ejemplo https://yourserver.com/cgi-bin/nooc-ice-lti-receiver-seguro.py?file=/B2-writing-correction-LTI.html
+#URL example https://yourserver.com/cgi-bin/lti-receiver.py?file=/B2-writing-correction-LTI.html
 
 import cgi
 import cgitb
@@ -13,13 +13,13 @@ import random
 import string
 from urllib.parse import parse_qs
 
-# ⚙️ CONFIGURACIÓN GLOBAL
+# ⚙️ GLOBAL CONFIGURATION
 DEBUG = False
-REDIRECT_URL = '/B2-writing-correction-LTI.html' # Destino por defecto
+REDIRECT_URL = '/B2-writing-correction-LTI.html' # Default destination
 SESSION_DIR = '/var/secure/lti_sessions'
 SESSION_TIMEOUT = 3600
 
-# Dominios autorizados para el acceso LTI
+# LTI Allowed origins
 ALLOWED_ORIGINS = [
     'https://youropenedx.com',
     'https://studio.youropenedx.com'
