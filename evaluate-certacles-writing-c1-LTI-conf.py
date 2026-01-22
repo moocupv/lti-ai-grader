@@ -36,7 +36,7 @@ CONFIG = {
     "api_url": None,                    # Optional for OpenAI compatible APIs (ej. Azure o Proxies). If None, uses the openai url.
 	  "model_name": "gemini-2.5-flash-lite",
     "grade_identifier": "FINAL_GRADE", # What parser is going to look for from the llm to get the grade (ej: FINAL_GRADE: 12/15), include its generation in prompt 
-    # ✅ LTI secrets (to be included in Moodel or  Open EdX configuration -LTI Passport-)  
+    # ✅ LTI secrets (to be included in Moodle or  Open EdX configuration -LTI Passport-)  
     "lti_consumer_secrets": {
         'openedx_key': os.getenv("LTI_OPENEDX_SECRET",""),
         'moodle_key': os.getenv("LTI_MOODLE_SECRET",""),
