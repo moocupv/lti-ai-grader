@@ -28,7 +28,7 @@ load_env_file("/var/secure/aigrader.env") #Locate  .env in a folder (for example
 CONFIG = {
     "DEBUG": False,
     "BASE_URL": "https://mi-lms.com", # Base URL for relative paths
-    "CORS_ALLOWED_ORIGINS": "https://yourserver.com", # "https://mi-lms.com, https://otro-dominio.es" or "*" . With the url of the server were the scripts are located is enough.
+    "CORS_ALLOWED_ORIGINS": "https://yourserver.com", # "https://mi-lms.com, https://otro-dominio.es" or "*" . With the url of the server where the scripts are located is enough.
     "LTI_ALLOWED_DOMAINS": "yourlms.com, canvas.instructure.com",
     "api_key": os.getenv("AI_GRADER_API_KEY_GOOGLE",""),
 	#"api_key": os.getenv("AI_GRADER_API_KEY_OPENAI",""),
