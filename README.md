@@ -102,6 +102,7 @@ The system uses a highly flexible entry point. Instead of hardcoding which exam 
 * **Session Integrity:** The evaluation script (`evaluate-certacles-writing-c1-LTI-conf.py`) will **refuse to use LMS parameters** unless it finds a valid token in `/var/secure/lti_sessions/`. This ensures the AI API can only be called after successful LMS connection.
 * **CORS & Domain Whitelisting:** `CORS_ALLOWED_ORIGINS` (for the server hosting the html, usually the same) and `LTI_ALLOWED_DOMAINS` (for the lms) restrict communication to trusted servers and LMS platforms.
 * **Environment Isolation:** Sensitive keys are loaded from `/var/secure/aigrader.env`, keeping them out of the web-accessible directory and the code.
+* **Rate Limiting (Nginx Layer):** The system implements request throttling at the web server level using `limit_req`. This prevents brute-force attacks and API cost overruns by limiting the number of requests per student IP (configured to 1 request/second with a small burst allowance).
 * **Debug mode in each section** A debug mode can be activated both in the html and the python scripts to solve setup problems.
 ---
 
