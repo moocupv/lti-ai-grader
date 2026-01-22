@@ -62,10 +62,6 @@ location /cgi-bin/ {
     fastcgi_send_timeout 180s;
 }
 ```
-Aquí tienes el resto del documento desde ese punto exacto, manteniendo el formato de bloque de código para que puedas copiar el Markdown íntegro:
-
-Markdown
-
 * Validate the config with `nginx -t`.
 * Restart the service with `systemctl restart nginx`.
 
@@ -98,6 +94,19 @@ The system uses a highly flexible entry point. Instead of hardcoding which exam 
 
 ## 5. Configuration Options
 
+### In the lti-receiver.py:
+```
+DEBUG = False
+REDIRECT_URL = '/B2-writing-correction-LTI.html' # default destination
+SESSION_DIR = '/var/secure/lti_sessions'
+SESSION_TIMEOUT = 3600
+
+# LTI allowed domains
+ALLOWED_ORIGINS = [
+    'https://youropenedx.com',
+    'https://studio.youropenedx.com'
+]
+```
 ### In the HTML file:
 ```javascript
 title: "C1 Writing",
@@ -150,9 +159,9 @@ CONFIG = {
 4.  In a unit, select **Advanced** in **Add a new component** and select **LTI Consumer**.
 5.  Edit the component:
     * **LTI ID:** Enter the `LTI_KEY_NAME` used in the passport.
-    * **LTI URL:** Enter the full URL pointing to `lti-receiver.py?file=...`.
+    * **LTI URL:** Enter the full URL pointing to `[lti-receiver.py?file=...](https://groq.cc.upv.es/cgi-bin/lti-receiver.py?file=/B2-writing-correction-LTI.html)`.
     * **LTI version:** 1.1/1.2.
-    * **Scored:** Set to `True` and define the points possible.
+    * **Scored:** Set to `True` and define the points possible in **Weight**.
 
 ---
 
