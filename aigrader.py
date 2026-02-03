@@ -33,7 +33,7 @@ def log_debug(message, config):
 def is_safe_url(url, allowed_domains_str):
     try:
         if not url: return False, "URL vacía"
-        base_url = config.get("BASE_URL", "https://yourlms.es").rstrip('/')
+        base_url = config.get("BASE_URL", "https://yourserver.com").rstrip('/')
         if url.startswith('/'):
             url = base_url + url
         parsed_url = urlparse(url)
