@@ -164,6 +164,7 @@ CONFIG = {
     "send_grade_to_lms": True,
     "system_instructions": """
        PROMPT for the LLM
+       It is very important that it includes a line that commands the LLM to include a line with the texte defined in the configuration (in this case FINAL_GRADE: X/5), as the regex expression of  extract_flexible_grade depends on it to capture the grade and send it to the LMS .
     """
 }
 ```
