@@ -17,7 +17,8 @@ const EvaluatorEngine = {
             privacyLabel: "Data Protection & Privacy",
             connError: "Connection Error: ",
             serverError: "Server Error: ",
-			emptySubmissionError: "ERROR: No response provided. Please write your task before submitting.\n\nGrade: 0 / 10"
+			emptySubmissionError: "ERROR: No response provided. Please write your task before submitting.\n\nGrade: 0 / 10",
+			invalidResponseError: "The AI model did not return a valid response. Please resubmit your answer as it may be a one-off error."
         },
         es: {
             ltiConnected: "🔗 <strong>Modo LTI:</strong> Tu nota se enviará a la plataforma.",
@@ -31,8 +32,9 @@ const EvaluatorEngine = {
             privacyLabel: "Información de Protección de Datos",
             connError: "Error de conexión: ",
             serverError: "Error del servidor: ",
-			emptySubmissionError: "ERROR: No has escrito ninguna respuesta. Por favor, realiza la tarea antes de enviar.\n\nNota: 0 / 10"
-        },
+			emptySubmissionError: "ERROR: No has escrito ninguna respuesta. Por favor, realiza la tarea antes de enviar.\n\nNota: 0 / 10",
+		    invalidResponseError: "El modelo de inteligencia artificial no ha devuelto una respuesta válida. Vuelve a enviar tu respuesta, puede ser un fallo puntual."
+	    },
         va: {
             ltiConnected: "🔗 <strong>Mode LTI:</strong> La teua nota s'enviarà a la plataforma.",
             standalone: "ℹ️ <strong>Mode Pràctica:</strong> Els resultats no es guarden.",
@@ -45,7 +47,8 @@ const EvaluatorEngine = {
             privacyLabel: "Informació de Protecció de Dades",
             connError: "Error de connexió: ",
             serverError: "Error del servidor: ",
-			emptySubmissionError: "ERROR: No has escrit cap resposta. Per favor, realitza la tasca abans d'enviar.\n\nNota: 0 / 10"
+			emptySubmissionError: "ERROR: No has escrit cap resposta. Per favor, realitza la tasca abans d'enviar.\n\nNota: 0 / 10",
+			invalidResponseError: "El model d'intel·ligència artificial no ha retornat una resposta vàlida. Torna a enviar la teua resposta, pot ser una fallada puntual."
         }
     },
 
@@ -177,7 +180,7 @@ const EvaluatorEngine = {
                 const start = rawText.indexOf('{');
                 const end = rawText.lastIndexOf('}') + 1;
 
-                if (start === -1) throw new Error("Invalid response format");
+                if (start === -1) throw new Error(this.txt.invalidResponseError);
 
                 const res = JSON.parse(rawText.substring(start, end));
                 this.showFeedback(res.success ? res.feedback : this.txt.serverError + res.error, res.success);
