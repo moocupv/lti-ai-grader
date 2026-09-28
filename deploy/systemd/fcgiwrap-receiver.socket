@@ -1,0 +1,11 @@
+[Unit]
+Description=fcgiwrap Socket for LTI Receiver
+
+[Socket]
+ListenStream=/run/fcgiwrap-receiver.socket
+SocketMode=0660
+SocketUser=www-data
+SocketGroup=www-data
+
+[Install]
+WantedBy=sockets.target

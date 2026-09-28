@@ -119,7 +119,7 @@ def call_ai_api(student_input, config):
             body = {"contents": [{"parts": [{"text": f"{config['system_instructions']}\n\nStudent Text:\n{student_input}"}]}]}
 
         req = urllib.request.Request(url, data=json.dumps(body).encode('utf-8'), headers=headers, method='POST')
-        with urllib.request.urlopen(req, timeout=120) as response:
+        with urllib.request.urlopen(req, timeout=config.get("api_timeout", 300)) as response:
             res = json.loads(response.read().decode('utf-8'))
             if provider == "openai":
                 feedback = res['choices'][0]['message']['content']

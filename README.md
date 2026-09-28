@@ -39,46 +39,115 @@ sudo chmod +x /usr/lib/cgi-bin/aigrader.py
 
 ## 2. Server Configuration (Nginx)
 
-When using Nginx, you must configure the cgi-bin section within a configuration file (.conf). 
-1. Files should be created in `/etc/nginx/sites-available/`.
-2. A symlink must then be created in `/etc/nginx/sites-enabled/` to activate the site.
+### 2.1 Why two FastCGI pools are used
 
-Add the following block to your configuration file:
+AI evaluation requests can remain blocked waiting for an LLM response for several minutes. If `lti-receiver.py` shares the same small `fcgiwrap` pool, a burst of simultaneous evaluations can consume every worker and prevent the next LTI activity from loading.
+
+The recommended Nginx deployment therefore uses two independent pools:
+
+| Purpose | Socket | Workers | Timeout |
+| :--- | :--- | ---: | ---: |
+| AI evaluator scripts (`evaluate-*.py`) | `/run/fcgiwrap.socket` | 16 | 300 s |
+| LTI launch receiver (`lti-receiver.py`) | `/run/fcgiwrap-receiver.socket` | 5 | 15 s |
+
+The receiver is lightweight: it stores the launch parameters, creates a session token and redirects the browser. It should normally respond in well under a second. The longer timeout belongs only to evaluator scripts, where reasoning models can legitimately take more than two minutes.
+
+### 2.2 Install/configure fcgiwrap
+
+Run:
+
+```bash
+sudo ./setup_grader_nginx.sh
+```
+
+The script installs `fcgiwrap`, configures the main service with 16 workers using a systemd drop-in, and installs the dedicated receiver socket/service from `deploy/systemd/`.
+
+The resulting services are:
+
+```text
+/run/fcgiwrap.socket           -> 16 workers -> evaluate-*.py
+/run/fcgiwrap-receiver.socket  ->  5 workers -> lti-receiver.py
+```
+
+Verify them with:
+
+```bash
+pgrep -a fcgiwrap
+ss -xl | grep fcgiwrap
+systemctl status fcgiwrap --no-pager
+systemctl status fcgiwrap-receiver.socket --no-pager
+systemctl status fcgiwrap-receiver.service --no-pager
+```
+
+The receiver service is socket-activated, so it can initially appear as `inactive (dead)` while `fcgiwrap-receiver.socket` is `active (listening)`. It starts automatically on the first LTI launch.
+
+### 2.3 Nginx configuration
+
+A ready-to-copy configuration is included in:
+
+```text
+deploy/nginx/lti-ai-grader-cgi.conf
+```
+
+The `limit_req_zone` directives must be in Nginx's `http {}` context (or in a file included from it). The two `location` blocks must be placed inside the HTTPS `server {}` that serves the grader.
 
 ```nginx
-# If you want to limit by IP ($binary_remote_addr) to avoid excessive use
-# Add this and the first command of the cgi-bib section
-# 'mylimit' is the name of the zone, 10m are 10 Megabytes to store IPs
-# rate=1r/s means "1 call per second" (it has been set to 1 call every 3 seconds adjust if needed)
-# 429 is a different error "Too Many Requests" so the caller can now the reason for the error
+# http{} context
 limit_req_zone $binary_remote_addr zone=mylimit:10m rate=20r/m;
+limit_req_zone $binary_remote_addr zone=lti_receiver:10m rate=60r/m;
 limit_req_status 429;
 
+# HTTPS server{} context
+location = /cgi-bin/lti-receiver.py {
+    limit_req zone=lti_receiver burst=20 nodelay;
+
+    fastcgi_buffering off;
+    gzip off;
+
+    alias /usr/lib/cgi-bin/lti-receiver.py;
+    fastcgi_pass unix:/run/fcgiwrap-receiver.socket;
+    include /etc/nginx/fastcgi_params;
+    fastcgi_param SCRIPT_FILENAME /usr/lib/cgi-bin/lti-receiver.py;
+
+    fastcgi_read_timeout 15s;
+    fastcgi_send_timeout 15s;
+    client_max_body_size 2M;
+
+    limit_except GET POST {
+        deny all;
+    }
+}
+
 location /cgi-bin/ {
-    # We apply the zone defined at the beginning of the configuration file
-    # burst=3 allows for a small excess of 3 calls in a burst
-    # nodelay avoids long queues by processing or rejecting the calls inmediately
     limit_req zone=mylimit burst=3 nodelay;
 
+    fastcgi_buffering off;
     gzip off;
-    fastcgi_buffering off; # Required for real-time AI feedback
 
     alias /usr/lib/cgi-bin/;
     fastcgi_pass unix:/var/run/fcgiwrap.socket;
-    include fastcgi_params;
-
-    # Ensures 'alias' resolves the script path correctly
+    include /etc/nginx/fastcgi_params;
     fastcgi_param SCRIPT_FILENAME $request_filename;
 
-    # Timeouts adjusted for LLM inference latency
-    fastcgi_read_timeout 180s;
-    fastcgi_send_timeout 180s;
+    fastcgi_read_timeout 300s;
+    fastcgi_send_timeout 300s;
+    client_max_body_size 2M;
+
+    limit_except GET POST {
+        deny all;
+    }
 }
 ```
-* Validate the config with `nginx -t`.
-* Restart the service with `systemctl restart nginx`.
 
----
+The separate rate limit for `lti-receiver.py` is deliberately more permissive so that a legitimate burst of students opening an activity at the same time is accepted while the public endpoint remains protected against abuse. Adjust these values to the expected traffic and network topology; students behind a shared NAT can appear to Nginx under the same source IP.
+
+Validate and reload Nginx:
+
+```bash
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
 
 ## 3. Launch Mechanism (The Entry Point)
 
@@ -102,7 +171,7 @@ The system uses a highly flexible entry point. Instead of hardcoding which exam 
 * **Session Integrity:** The evaluation script (`evaluate-certacles-writing-c1-LTI-conf.py`) will **refuse to use LMS parameters** unless it finds a valid token in `/var/secure/lti_sessions/`. This ensures the AI API can only be called after successful LMS connection.
 * **CORS & Domain Whitelisting:** `CORS_ALLOWED_ORIGINS` (for the server hosting the html, usually the same) and `LTI_ALLOWED_DOMAINS` (for the lms) restrict communication to trusted servers and LMS platforms.
 * **Environment Isolation:** Sensitive keys are loaded from `/var/secure/aigrader.env`, keeping them out of the web-accessible directory and the code.
-* **Rate Limiting (Nginx Layer):** The system implements request throttling at the web server level using `limit_req`. This prevents brute-force attacks and API cost overruns by limiting the number of requests per student IP (configured to 1 request/second with a small burst allowance).
+* **Rate Limiting (Nginx Layer):** Nginx uses separate `limit_req` zones for AI evaluation requests and LTI launches. The default example limits evaluators to 20 requests/minute per source IP with `burst=3`, and the lightweight receiver to 60 requests/minute with `burst=20`. Tune these values for your deployment, especially when many students can share a NAT/proxy address.
 * **Debug mode in each section** A debug mode can be activated both in the html and the python scripts to solve setup problems.
 ---
 
@@ -154,6 +223,7 @@ CONFIG = {
     "provider": "google", # Options: "google" o "openai"
     "api_url": None,  # Optional for OpenAI compatible APIs (ej. Azure o Proxies). If None, uses the openai url.
     "model_name": "gemini-2.5-flash-lite",
+    "api_timeout": 300, # Maximum time in seconds to wait for the LLM API
     "grade_identifier": "FINAL_GRADE", # What parser is going to look for from the llm to get the grade (ej: FINAL_GRADE: 12/15), include its generation in prompt 
     # ✅ LTI secrets (to be included in Moodle or Open EdX configuration)  
     "lti_consumer_secrets": {
@@ -189,12 +259,40 @@ CONFIG = {
 * [ ] Scripts placed in `/usr/lib/cgi-bin/` and made executable.
 * [ ] `.html` and `.js` files placed in `/var/www/html/`.
 * [ ] `/var/secure/aigrader.env` created with valid API keys and LTI secrets.
-* [ ] Nginx configured with the `cgi-bin` block and services restarted.
+* [ ] `fcgiwrap` main pool running with 16 workers.
+* [ ] Dedicated `fcgiwrap-receiver.socket` enabled and listening.
+* [ ] Nginx configured with the dedicated receiver and evaluator `location` blocks.
+* [ ] `nginx -t` succeeds and Nginx has been reloaded.
 * [ ] LTI component configured in the LMS with matching URL, Key, and Secret.
 
 ---
 
-## 8. Dynamic Task Definition (Advanced Use)
+
+## 8. Concurrency Diagnostics and Load Testing
+
+For classroom or MOOC deployments, the important signal is not only CPU/RAM usage but also whether all evaluator workers are occupied by long-running LLM calls. The dedicated receiver pool should remain responsive even when the evaluator pool is saturated.
+
+Useful live checks:
+
+```bash
+# Show both fcgiwrap pools and any evaluator subprocesses
+ps -eo pid,ppid,stat,etime,rss,%mem,%cpu,cmd | \
+    grep -E 'fcgiwrap|evaluate-|lti-receiver' | grep -v grep
+
+# Check both Unix sockets
+ss -xl | grep fcgiwrap
+
+# Watch Nginx for upstream timeouts or rate limiting
+sudo tail -f /var/log/nginx/error.log
+```
+
+During a load test, an `upstream timed out` for `evaluate-*.py` means an evaluation exceeded the configured FastCGI timeout. An `upstream timed out` for `lti-receiver.py` is more serious because the receiver should be fast; with the isolated receiver pool it should normally remain at zero even when many evaluations are running.
+
+The Python LLM request timeout defaults to 300 seconds (`api_timeout` in the evaluator configuration). Keep it aligned with, or slightly below, Nginx's evaluator `fastcgi_read_timeout` so that one layer does not abort substantially earlier than the other.
+
+---
+
+## 9. Dynamic Task Definition (Advanced Use)
 
 It is possible to dynamically override the task instructions (`taskHTML`) and the `initialValue` template without modifying the shared HTML file. This allows you to **reuse the same LTI tool and exam interface** across different Open edX units while grading entirely different prompts.
 

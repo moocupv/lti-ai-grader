@@ -1,0 +1,12 @@
+[Unit]
+Description=fcgiwrap for LTI Receiver
+After=nss-user-lookup.target
+Requires=fcgiwrap-receiver.socket
+
+[Service]
+ExecStart=/usr/sbin/fcgiwrap -f -c 5
+User=www-data
+Group=www-data
+
+[Install]
+Also=fcgiwrap-receiver.socket
