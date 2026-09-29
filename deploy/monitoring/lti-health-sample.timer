@@ -1,0 +1,10 @@
+[Unit]
+Description=Sample LTI AI Grader health every 30 seconds
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=30s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

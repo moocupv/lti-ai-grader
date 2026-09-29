@@ -1,0 +1,6 @@
+[Unit]
+Description=LTI AI Grader daily health report
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/lti-health-daily.sh

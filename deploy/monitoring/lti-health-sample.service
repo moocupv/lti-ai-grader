@@ -1,0 +1,6 @@
+[Unit]
+Description=LTI AI Grader lightweight health sample
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/lti-health-sample.sh

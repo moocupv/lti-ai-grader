@@ -292,7 +292,70 @@ The Python LLM request timeout defaults to 300 seconds (`api_timeout` in the eva
 
 ---
 
-## 9. Dynamic Task Definition (Advanced Use)
+## 9. Optional Lightweight Production Monitoring
+
+For long-running MOOC installations, the repository includes optional low-overhead monitoring. It is designed to answer operational questions such as whether evaluator concurrency is approaching the worker limit, whether socket queues are building up, whether evaluations are becoming unusually long, and whether the server is running low on memory or disk space.
+
+The monitor does **not** call the LLM or generate synthetic traffic. Every 30 seconds, a short `systemd` oneshot service reads inexpensive local metrics (`/proc`, `ps`, `ss`, and `df`) and appends one CSV row. Nginx access/error logs remain the authoritative source for exact HTTP errors and timeouts. A second timer creates a daily summary from both sources.
+
+Install it with:
+
+```bash
+sudo ./setup_monitoring.sh
+```
+
+The installer enables:
+
+```text
+lti-health-sample.timer   # sample every 30 seconds
+lti-health-daily.timer    # daily report at 00:10
+```
+
+Monthly raw metrics are stored in:
+
+```text
+/var/log/lti-health/metrics-YYYY-MM.csv
+```
+
+Daily reports are stored in:
+
+```text
+/var/log/lti-health/report-YYYY-MM-DD.txt
+```
+
+The CSV fields are:
+
+```text
+timestamp,load1,mem_available_mb,disk_used_pct,evaluators,oldest_evaluator_sec,lti_receivers,fcgi_general,fcgi_receiver,queue_general,queue_receiver
+```
+
+The most useful indicators are:
+
+- `evaluators`: number of evaluator Python processes observed at the sample time.
+- `oldest_evaluator_sec`: age of the longest-running evaluator process; useful for identifying slow LLM calls.
+- `queue_general` and `queue_receiver`: Unix socket `Recv-Q` values. Sustained non-zero values indicate requests waiting before a worker accepts them.
+- `fcgi_general` and `fcgi_receiver`: observed fcgiwrap process counts, useful for detecting a failed or partially started pool.
+- `mem_available_mb`, `disk_used_pct`, and `load1`: basic host capacity signals.
+
+A 30-second interval is deliberately a compromise: it is cheap enough for permanent monitoring while capturing sustained load and most meaningful concurrency periods. Very short spikes can fall between samples, so exact failures (HTTP 429/5xx and upstream timeouts) are counted from Nginx logs in the daily report instead.
+
+Useful checks:
+
+```bash
+systemctl list-timers --all | grep lti-health
+sudo tail /var/log/lti-health/metrics-$(date +%Y-%m).csv
+sudo cat "$(ls -1t /var/log/lti-health/report-*.txt | head -1)"
+```
+
+Monitoring is optional and can be disabled without affecting the grader:
+
+```bash
+sudo systemctl disable --now lti-health-sample.timer lti-health-daily.timer
+```
+
+---
+
+## 10. Dynamic Task Definition (Advanced Use)
 
 It is possible to dynamically override the task instructions (`taskHTML`) and the `initialValue` template without modifying the shared HTML file. This allows you to **reuse the same LTI tool and exam interface** across different Open edX units while grading entirely different prompts.
 
