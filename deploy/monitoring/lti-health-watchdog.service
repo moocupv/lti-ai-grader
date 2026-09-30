@@ -1,0 +1,7 @@
+[Unit]
+Description=LTI AI Grader monitoring watchdog
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/lti-health/mail.env
+ExecStart=/usr/local/sbin/lti-health-watchdog.sh

@@ -294,11 +294,11 @@ The Python LLM request timeout defaults to 300 seconds (`api_timeout` in the eva
 
 ## 9. Optional Lightweight Production Monitoring
 
-For long-running MOOC installations, the repository includes optional low-overhead monitoring. It is designed to answer operational questions such as whether evaluator concurrency is approaching the worker limit, whether socket queues are building up, whether evaluations are becoming unusually long, and whether the server is running low on memory or disk space.
+For long-running MOOC installations, the repository includes optional low-overhead monitoring. It tracks evaluator concurrency, socket queues, long-running evaluations, memory/disk/load, Nginx errors, and real LTI usage by activity and evaluator.
 
-The monitor does **not** call the LLM or generate synthetic traffic. Every 30 seconds, a short `systemd` oneshot service reads inexpensive local metrics (`/proc`, `ps`, `ss`, and `df`) and appends one CSV row. Nginx access/error logs remain the authoritative source for exact HTTP errors and timeouts. A second timer creates a daily summary from both sources.
+The monitor does **not** call the LLM or generate synthetic traffic. Every 30 seconds, a short `systemd` oneshot service reads inexpensive local metrics (`/proc`, `ps`, `ss`, and `df`) and appends one CSV row. Nginx access/error logs remain the authoritative source for exact HTTP failures, timeouts, launches, and corrections.
 
-Install it with:
+Install or update it with:
 
 ```bash
 sudo ./setup_monitoring.sh
@@ -307,8 +307,10 @@ sudo ./setup_monitoring.sh
 The installer enables:
 
 ```text
-lti-health-sample.timer   # sample every 30 seconds
-lti-health-daily.timer    # daily report at 00:10
+lti-health-sample.timer      # sample every 30 seconds
+lti-health-daily.timer       # daily report at 00:10
+lti-health-weekly.timer      # weekly report every Monday at 08:00
+lti-health-watchdog.timer    # health check every hour
 ```
 
 Monthly raw metrics are stored in:
@@ -317,11 +319,21 @@ Monthly raw metrics are stored in:
 /var/log/lti-health/metrics-YYYY-MM.csv
 ```
 
-Daily reports are stored in:
+Daily and weekly reports are stored in:
 
 ```text
 /var/log/lti-health/report-YYYY-MM-DD.txt
+/var/log/lti-health/weekly-YYYY-Www.txt
 ```
+
+The daily and weekly reports include a usage table derived from the existing Nginx access logs:
+
+```text
+Activity                              Launches Corrections    200    429    499    500    502    503    504  Other
+/B2-writing-correction-LTI.html            812         226    220      0      3      0      0      0      3      0
+```
+
+They also include correction counts by `evaluate-*.py` script. Query strings are not copied into reports, so LTI tokens are not retained by the monitoring reports.
 
 The CSV fields are:
 
@@ -329,15 +341,47 @@ The CSV fields are:
 timestamp,load1,mem_available_mb,disk_used_pct,evaluators,oldest_evaluator_sec,lti_receivers,fcgi_general,fcgi_receiver,queue_general,queue_receiver
 ```
 
-The most useful indicators are:
+The watchdog checks that the sampling and daily timers are active, both fcgiwrap pools are available, the latest sample is fresh, root filesystem usage is below the configured threshold, and yesterday's report exists after 02:00. It only sends a new alert when the detected problem changes, and sends a recovery message when monitoring becomes healthy again.
 
-- `evaluators`: number of evaluator Python processes observed at the sample time.
-- `oldest_evaluator_sec`: age of the longest-running evaluator process; useful for identifying slow LLM calls.
-- `queue_general` and `queue_receiver`: Unix socket `Recv-Q` values. Sustained non-zero values indicate requests waiting before a worker accepts them.
-- `fcgi_general` and `fcgi_receiver`: observed fcgiwrap process counts, useful for detecting a failed or partially started pool.
-- `mem_available_mb`, `disk_used_pct`, and `load1`: basic host capacity signals.
+### Weekly email configuration
 
-A 30-second interval is deliberately a compromise: it is cheap enough for permanent monitoring while capturing sustained load and most meaningful concurrency periods. Very short spikes can fall between samples, so exact failures (HTTP 429/5xx and upstream timeouts) are counted from Nginx logs in the daily report instead.
+Email is optional. The installer places a template at:
+
+```text
+/etc/lti-health/mail.env.example
+```
+
+Copy it to the protected configuration file and edit the SMTP values:
+
+```bash
+sudo cp /etc/lti-health/mail.env.example /etc/lti-health/mail.env
+sudo chmod 600 /etc/lti-health/mail.env
+sudo editor /etc/lti-health/mail.env
+```
+
+Example:
+
+```text
+MAIL_TO=admin@example.org
+MAIL_FROM=lti-health@example.org
+SMTP_HOST=smtp.example.org
+SMTP_PORT=587
+SMTP_USER=example-user
+SMTP_PASSWORD=change-me
+SMTP_STARTTLS=true
+SMTP_SSL=false
+SMTP_TIMEOUT=20
+```
+
+Do not commit `/etc/lti-health/mail.env` or real credentials to Git. The mail sender uses only Python's standard library (`smtplib`), so no additional Python package is required.
+
+After configuring mail, test the complete weekly report without waiting for Monday:
+
+```bash
+sudo systemctl start lti-health-weekly.service
+sudo systemctl status lti-health-weekly.service --no-pager
+sudo cat "$(ls -1t /var/log/lti-health/weekly-*.txt | head -1)"
+```
 
 Useful checks:
 
@@ -345,12 +389,24 @@ Useful checks:
 systemctl list-timers --all | grep lti-health
 sudo tail /var/log/lti-health/metrics-$(date +%Y-%m).csv
 sudo cat "$(ls -1t /var/log/lti-health/report-*.txt | head -1)"
+sudo systemctl start lti-health-watchdog.service
+sudo journalctl -u lti-health-watchdog.service -n 30 --no-pager
 ```
 
-Monitoring is optional and can be disabled without affecting the grader:
+To test the Nginx usage parser for a specific day:
 
 ```bash
-sudo systemctl disable --now lti-health-sample.timer lti-health-daily.timer
+sudo /usr/local/sbin/lti-health-log-stats.py --start 2026-09-29 --end 2026-09-29
+```
+
+Monitoring data older than approximately 400 days is removed by the daily job. Monitoring is optional and can be disabled without affecting the grader:
+
+```bash
+sudo systemctl disable --now \
+  lti-health-sample.timer \
+  lti-health-daily.timer \
+  lti-health-weekly.timer \
+  lti-health-watchdog.timer
 ```
 
 ---
