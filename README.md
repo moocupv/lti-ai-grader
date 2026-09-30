@@ -14,7 +14,7 @@ The security of this application relies on a **"Private/Public" split**. All Pyt
 | :--- | :--- | :--- |
 | `/usr/lib/cgi-bin/` | lti-receiver.py (Handshake) | 755 (Owner: root, Group: www-data) |
 | `/usr/lib/cgi-bin/` | evaluate-certacles-writing-c1-LTI-conf.py and aigrader.py | 755 (Owner: root, Group: www-data) |
-| `/var/www/html/` | B2-writing-correction-LTI.html and aigrader.js | 644 (Owner: www-data) |
+| `/usr/share/nginx/html/` | B2-writing-correction-LTI.html and aigrader.js | 644 (Owner: www-data) |
 | `/var/secure/lti_sessions/` | Temporary session tokens (JSON) | 770 (Owner: www-data) |
 | `/var/secure/aigrader.env` | API Keys and LTI Secrets | 640 (Owner: root, Group: www-data) |
 
@@ -255,9 +255,64 @@ CONFIG = {
 
 ---
 
-## 7. Deployment Checklist
+## 7. Recommended Deployment from a Local Git Checkout
+
+For production, keep a local checkout of this repository outside the web root, for example:
+
+```bash
+cd /opt
+sudo git clone https://github.com/moocupv/lti-ai-grader.git
+sudo chown -R "$USER":"$USER" /opt/lti-ai-grader
+```
+
+The Git checkout is a **deployment source**, not the directory served directly by Nginx. Production files remain in their normal locations:
+
+```text
+/opt/lti-ai-grader/       local Git checkout / deployment source
+/usr/share/nginx/html/    public HTML, JavaScript and CSS
+/usr/lib/cgi-bin/         CGI Python application
+/usr/local/sbin/          monitoring scripts
+/etc/systemd/system/      systemd services, sockets and timers
+/etc/lti-health/          private monitoring/mail configuration
+/var/log/lti-health/      monitoring metrics and reports
+```
+
+A deployment helper is included at:
+
+```text
+deploy/deploy_to_server.sh
+```
+
+Normal update workflow:
+
+```bash
+cd /opt/lti-ai-grader
+git pull
+sudo ./deploy/deploy_to_server.sh
+```
+
+The deployment script intentionally **does not delete** files from the production directories. It only copies known application files that exist in the checkout. It also never overwrites `/etc/lti-health/mail.env`, so SMTP credentials remain local to the server and outside Git.
+
+The script performs the following actions:
+
+- copies root-level `.html`, `.js` and `.css` files to `/usr/share/nginx/html/`;
+- copies `aigrader.py`, `lti-receiver.py` and `evaluate-*.py` to `/usr/lib/cgi-bin/`;
+- copies `*-conf.json` evaluator configuration files to `/usr/lib/cgi-bin/` when present;
+- installs monitoring scripts from `deploy/monitoring/` into `/usr/local/sbin/`;
+- installs monitoring and fcgiwrap systemd units into `/etc/systemd/system/`;
+- enables/restarts monitoring timers that are present in the repository;
+- enables the dedicated `fcgiwrap-receiver.socket` when its unit is present;
+- runs `systemctl daemon-reload` and `nginx -t` as final validation.
+
+The script does **not** automatically modify the active Nginx virtual-host configuration or `/var/secure/aigrader.env`. Those contain deployment-specific settings and secrets and should remain under explicit administrator control.
+
+For the first installation, review the files and server paths before running the deploy helper. For later updates, the `git pull` + deployment-script workflow makes the deployed version reproducible while keeping the Git checkout separate from the live web/CGI directories.
+
+---
+
+## 8. Deployment Checklist
 * [ ] Scripts placed in `/usr/lib/cgi-bin/` and made executable.
-* [ ] `.html` and `.js` files placed in `/var/www/html/`.
+* [ ] `.html` and `.js` files placed in `/usr/share/nginx/html/`.
 * [ ] `/var/secure/aigrader.env` created with valid API keys and LTI secrets.
 * [ ] `fcgiwrap` main pool running with 16 workers.
 * [ ] Dedicated `fcgiwrap-receiver.socket` enabled and listening.
@@ -268,7 +323,7 @@ CONFIG = {
 ---
 
 
-## 8. Concurrency Diagnostics and Load Testing
+## 9. Concurrency Diagnostics and Load Testing
 
 For classroom or MOOC deployments, the important signal is not only CPU/RAM usage but also whether all evaluator workers are occupied by long-running LLM calls. The dedicated receiver pool should remain responsive even when the evaluator pool is saturated.
 
@@ -292,7 +347,7 @@ The Python LLM request timeout defaults to 300 seconds (`api_timeout` in the eva
 
 ---
 
-## 9. Optional Lightweight Production Monitoring
+## 10. Optional Lightweight Production Monitoring
 
 For long-running MOOC installations, the repository includes optional low-overhead monitoring. It tracks evaluator concurrency, socket queues, long-running evaluations, memory/disk/load, Nginx errors, and real LTI usage by activity and evaluator.
 
@@ -411,7 +466,7 @@ sudo systemctl disable --now \
 
 ---
 
-## 10. Dynamic Task Definition (Advanced Use)
+## 11. Dynamic Task Definition (Advanced Use)
 
 It is possible to dynamically override the task instructions (`taskHTML`) and the `initialValue` template without modifying the shared HTML file. This allows you to **reuse the same LTI tool and exam interface** across different Open edX units while grading entirely different prompts.
 
