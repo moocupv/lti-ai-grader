@@ -1,30 +1,23 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import json
-import sys
 import os
+import sys
+import json
+import re
 import time
-import cgitb
+import uuid
+import hmac
+import hashlib
+import base64
 import urllib.request
 import urllib.parse
-import urllib.error
-import re
-import hashlib
-import hmac
-import base64
-import uuid
-import io
 from urllib.parse import urlparse
 
-# Enforce UTF-8 to prevent formatting errors with long rubrics.
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-
-def setup_environment(debug_mode):
+def setup_environment(debug_mode=False):
     if debug_mode:
+        import cgitb
         cgitb.enable()
-    else:
-        sys.tracebacklimit = 0
 
 def log_debug(message, config):
     if config.get("DEBUG"):
@@ -32,19 +25,22 @@ def log_debug(message, config):
 
 def is_safe_url(url, allowed_domains_str):
     try:
-        if not url: return False, "URL vacía"
-        base_url = config.get("BASE_URL", "https://yourserver.com").rstrip('/')
-        if url.startswith('/'):
-            url = base_url + url
+        if not url:
+            return False, "URL vacía"
+
         parsed_url = urlparse(url)
         if parsed_url.scheme != 'https':
             return False, "Only HTTPS connections"
-        allowed_list = [d.strip().lower() for d in allowed_domains_str.split(",")]
-        domain = parsed_url.netloc.lower()
+
+        allowed_list = [d.strip().lower() for d in allowed_domains_str.split(",") if d.strip()]
+        domain = (parsed_url.hostname or parsed_url.netloc).lower()
+
         if any(domain == d or domain.endswith('.' + d) for d in allowed_list):
             return True, url
+
         return False, f"Non authorised domain: {domain}"
-    except Exception:
+    except Exception as e:
+        sys.stderr.write(f"[is_safe_url ERROR] {type(e).__name__}: {str(e)}\n")
         return False, "Error in URL processing"
 
 def extract_flexible_grade(text, grade_identifier):
@@ -59,10 +55,17 @@ def extract_flexible_grade(text, grade_identifier):
 
 def send_grade_to_lti(outcome_url, result_sourcedid, consumer_key, score_normalized, config):
     try:
+        log_debug(f"Iniciando envio de nota LTI a: {outcome_url}", config)
+
         is_safe, final_url = is_safe_url(outcome_url, config.get("LTI_ALLOWED_DOMAINS", ""))
-        if not is_safe: return False
+        if not is_safe:
+            log_debug(f"URL rechazada por is_safe_url. Permitidos: {config.get('LTI_ALLOWED_DOMAINS')}", config)
+            return False
+
         secret = config.get("lti_consumer_secrets", {}).get(consumer_key)
-        if not secret: return False
+        if not secret:
+            log_debug(f"No hay secret configurado para consumer_key: '{consumer_key}'", config)
+            return False
 
         xml_body = f"""<?xml version="1.0" encoding="UTF-8"?>
 <imsx_POXEnvelopeRequest xmlns="http://www.imsglobal.org/services/ltiv1p1/xsd/imsoms_v1p0">
@@ -90,10 +93,24 @@ def send_grade_to_lti(outcome_url, result_sourcedid, consumer_key, score_normali
         oauth_params['oauth_signature'] = signature
         auth_header = 'OAuth ' + ', '.join([f'{k}="{urllib.parse.quote(v)}"' for k, v in oauth_params.items()])
 
-        req = urllib.request.Request(final_url, data=xml_body.encode('utf-8'), headers={'Content-Type': 'application/xml', 'Authorization': auth_header})
+        req = urllib.request.Request(
+            final_url,
+            data=xml_body.encode('utf-8'),
+            headers={'Content-Type': 'application/xml', 'Authorization': auth_header}
+        )
+
         with urllib.request.urlopen(req, timeout=15) as response:
-            return response.getcode() == 200
-    except Exception:
+            res_code = response.getcode()
+            res_body = response.read().decode('utf-8', errors='ignore')
+            log_debug(f"Respuesta de Open edX -> Code: {res_code}, Body: {res_body}", config)
+            return res_code == 200
+
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode('utf-8', errors='ignore') if e.fp else ""
+        log_debug(f"HTTPError al conectar con Open edX -> {e.code} {e.reason}: {err_body}", config)
+        return False
+    except Exception as e:
+        log_debug(f"Excepcion en send_grade_to_lti -> {type(e).__name__}: {str(e)}", config)
         return False
 
 def call_ai_api(student_input, config):
@@ -113,7 +130,7 @@ def call_ai_api(student_input, config):
                 ],
                 "temperature": 0.2
             }
-        else: # Google
+        else:  # Google
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{config['model_name']}:generateContent?key={config['api_key']}"
             headers = {'Content-Type': 'application/json'}
             body = {"contents": [{"parts": [{"text": f"{config['system_instructions']}\n\nStudent Text:\n{student_input}"}]}]}
@@ -141,9 +158,8 @@ def run(config):
     sys.stdout.write(f"Access-Control-Allow-Origin: {header_origin}\n")
     sys.stdout.write("Access-Control-Allow-Methods: POST, OPTIONS\n")
     sys.stdout.write("Access-Control-Allow-Headers: Content-Type\n\n")
-    sys.stdout.flush()
 
-    if os.environ.get('REQUEST_METHOD') == 'OPTIONS':
+    if os.environ.get('REQUEST_METHOD', '').upper() == 'OPTIONS':
         return
 
     try:
@@ -187,12 +203,13 @@ def run(config):
                             lti_params.get('lis_outcome_service_url'),
                             lti_params.get('lis_result_sourcedid'),
                             lti_params.get('oauth_consumer_key'),
-                            score/maximum if maximum > 0 else 0,
+                            score / maximum if maximum > 0 else 0,
                             config
                         )
 
             sys.stdout.write(json.dumps({
-                'success': True, 'feedback': feedback,
+                'success': True,
+                'feedback': feedback,
                 'score_info': {'score': score, 'max': maximum},
                 'lti_notified': grade_sent
             }, ensure_ascii=False))
@@ -203,4 +220,3 @@ def run(config):
         sys.stdout.write(json.dumps({'success': False, 'error': str(e)}))
 
     sys.stdout.flush()
-
