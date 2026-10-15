@@ -17,12 +17,12 @@ LOAD1="$(awk '{print $1}' /proc/loadavg)"
 MEM_AVAILABLE_MB="$(awk '/MemAvailable:/ {printf "%d", $2/1024}' /proc/meminfo)"
 DISK_USED_PCT="$(df -P / | awk 'NR==2 {gsub("%","",$5); print $5}')"
 
-EVALUATORS="$(pgrep -fc '^python3 /usr/lib/cgi-bin/evaluate-' 2>/dev/null || true)"
+EVALUATORS="$(pgrep -fc '^python3 /usr/lib/cgi-bin/evalua' 2>/dev/null || true)"
 LTI_RECEIVERS="$(pgrep -fc '^python3 /usr/lib/cgi-bin/lti-receiver.py' 2>/dev/null || true)"
 
 OLDEST_EVALUATOR_SEC="$(
     ps -eo etimes=,args= 2>/dev/null |
-    awk '/python3 \/usr\/lib\/cgi-bin\/evaluate-/ {
+    awk '/python3 \/usr\/lib\/cgi-bin\/evalua/ {
         if ($1 > max) max=$1
     }
     END {print max+0}'

@@ -1,0 +1,35 @@
+<problem>
+    <customresponse cfn="check_function">
+        <script type="loncapa/python">
+<![CDATA[
+import json
+
+def check_function(e, ans):
+    """
+    "ans" es un JSON con dos claves: "answer" (lo que devuelve getGrade) y
+    "state" (lo que devuelve getState). Aqui no se puntua nada: solo se exige
+    que haya al menos un intento almacenado. La nota real la pone el LTI.
+    """
+    try:
+        response = json.loads(ans)
+        answer = response["answer"]
+        if isinstance(answer, str):
+            answer = json.loads(answer)
+        return isinstance(answer, dict) and len(answer.get("intentos", [])) > 0
+    except Exception:
+        return False
+]]>
+        </script>
+        <jsinput
+            gradefn="AlmacenCorrecciones.getGrade"
+            get_statefn="AlmacenCorrecciones.getState"
+            set_statefn="AlmacenCorrecciones.setState"
+            initial_state='{"v": 1, "intentos": []}'
+            width="600"
+            height="110"
+            html_file="https://yourserver.com/jsinput_store.html"
+            title="Registro de correcciones"
+            sop="false"
+        />
+    </customresponse>
+</problem>

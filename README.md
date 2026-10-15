@@ -203,6 +203,7 @@ initialValue: "####TASK\n\nTask description text\n\n####ANSWER\n\nYour answer",
 placeholder: "Type your text here...",
 evaluatorUrl: '/cgi-bin/evaluate-certacles-writing-c1-LTI-conf.py',
 privacyUrl: "/evaluator_privacy_policy_Certacles_C1.html",
+saveToLms: false, // optional (Open edX): send answer + AI correction back to the LMS, see openedx/README.md
 debug: false
 ```
 ### In the aigrader.js file:
@@ -251,6 +252,12 @@ CONFIG = {
     * **LTI URL:** Enter the full URL pointing to `[lti-receiver.py?file=...](https://groq.cc.upv.es/cgi-bin/lti-receiver.py?file=/B2-writing-correction-LTI.html)`.
     * **LTI version:** 1.1/1.2.
     * **Scored:** Set to `True` and define the points possible in **Weight**.
+
+### 6.1 Optional: store the student's answer and the AI correction in the LMS
+
+With `saveToLms: true` in the corrector's HTML, every AI correction (student answer + feedback + grade) is sent back to the Open edX page and saved, accumulating all attempts, in the student's state of a *Custom JavaScript Display and Grading* problem. Instructors can then download it from the Instructor Dashboard. It is disabled by default and needs no change on the Python side.
+
+See [`openedx/README.md`](openedx/README.md) for the architecture, setup, configuration and troubleshooting.
 
 ---
 

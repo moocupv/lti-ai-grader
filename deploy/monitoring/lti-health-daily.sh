@@ -64,11 +64,11 @@ zgrep -h "$ERROR_DAY" /var/log/nginx/error.log* 2>/dev/null > "$TMP_ERRORS" || t
     echo
     echo "---------------- NGINX EVENTS ----------------"
     echo "LTI receiver requests: $(grep -c '/cgi-bin/lti-receiver.py' "$TMP_ACCESS" || true)"
-    echo "Evaluator requests: $(grep -c '/cgi-bin/evaluate-' "$TMP_ACCESS" || true)"
+    echo "Evaluator requests: $(grep -c '/cgi-bin/evalua' "$TMP_ACCESS" || true)"
     echo "HTTP 429 responses: $(grep -cE '" 429 ' "$TMP_ACCESS" || true)"
     echo "HTTP 5xx responses: $(grep -cE '" 50[0-9] ' "$TMP_ACCESS" || true)"
     echo "Upstream timeouts: $(grep -c 'upstream timed out' "$TMP_ERRORS" || true)"
-    echo "Evaluator upstream timeouts: $(grep 'upstream timed out' "$TMP_ERRORS" | grep -c '/cgi-bin/evaluate-' || true)"
+    echo "Evaluator upstream timeouts: $(grep 'upstream timed out' "$TMP_ERRORS" | grep -c '/cgi-bin/evalua' || true)"
     echo "Receiver upstream timeouts: $(grep 'upstream timed out' "$TMP_ERRORS" | grep -c 'lti-receiver.py' || true)"
     echo "Rate-limit events: $(grep -c 'limiting requests' "$TMP_ERRORS" || true)"
 

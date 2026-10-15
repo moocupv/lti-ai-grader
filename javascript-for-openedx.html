@@ -1,46 +1,352 @@
-<!-- If you want to change the task description from open edx, you have to add this to an html component situated before the LTI component in the same unit -->
+<!--
+  COMPONENTE HTML DE OPEN EDX (puente)
+  Colócalo en la misma unidad, ANTES del componente LTI y del problema jsinput.
+
+  Hace dos cosas:
+    1) Envía el enunciado al iframe de la herramienta LTI (como ya hacía).
+    2) NUEVO: recibe la corrección que genera la herramienta y se la pasa al
+       problema "Custom JavaScript Display and Grading" (jsinput), que la
+       acumula con las anteriores y la guarda en el estado del alumno.
+
+  Mensajes (postMessage):
+    LTI  -> puente : { accion: 'hijo_listo' }
+    puente -> LTI  : { accion: 'rellenar_estudiante', texto }
+    LTI  -> puente : { accion: 'guardar_correccion', intento: {...} }      (NUEVO)
+    puente -> LTI  : { accion: 'correccion_almacenada', id, total }        (NUEVO, confirmación)
+    jsinput -> puente : { accion: 'almacen_listo' }                        (NUEVO)
+    puente -> jsinput : { accion: 'puente_activo' }                        (NUEVO)
+    puente -> jsinput : { accion: 'anadir_intento', intento }              (NUEVO)
+    jsinput -> puente : { accion: 'intento_guardado', id, total }          (NUEVO)
+-->
+
 <p>
+
 <script>
-(function() {
-    // We define the task in plain text
-    const enunciadoTarea = `WRITING TASK 2
+
+(function () {
+
+  'use strict';
+
+  // ---------------------------------------------------------------------
+  // CONFIGURACIÓN
+  // ---------------------------------------------------------------------
+  const CONFIG = {
+    // Orígenes EXACTOS (esquema + dominio) del servidor donde está la herramienta LTI.
+    // Se compara por igualdad; no usar .includes(), que acepta dominios como
+    // "https://yourdomain.com.atacante.net".
+    toolOrigins: ['https://yourserver.com'],
+
+    // Texto que debe aparecer en el atributo src del iframe del problema jsinput
+    // (el nombre del fichero basta). Open edX crea ese iframe con el atributo `sandbox`
+    // SIN allow-same-origin, así que sus mensajes llegan con origin "null" y no se puede
+    // identificar por origen: se identifica por ser un iframe de esta página con ese src.
+    storeSrcMatch: 'jsinput_store.html',
+
+    // Botón del problema que se pulsa automáticamente tras añadir un intento, para
+    // que el LMS guarde el estado sin que el alumno tenga que hacer nada.
+    //   'button.submit' -> "Enviar" (cuenta como intento; requiere codejail en el LMS)
+    //   'button.save'   -> "Guardar" (no cuenta intento; no ejecuta la función de corrección)
+    //   ''              -> desactivado (el alumno debe pulsar el botón a mano)
+    autoSubmitSelector: '.problems-wrapper button.submit',
+    autoSubmitDelayMs: 300,
+    // Si el almacén no confirma el intento (su confirmación no llega al puente), se pulsa igualmente
+    // el botón pasado este tiempo desde que el intento se envió al iframe del almacén.
+    autoSubmitFallbackMs: 1800,
+
+    // Ocultar el botón "Enviar" del problema: lo pulsa el puente por el alumno.
+    // Salvaguarda: si el puente no puede pulsarlo, o no se confirma que el problema se
+    // volvió a pintar tras el envío, el botón se MUESTRA de nuevo y el almacén indica al
+    // alumno que lo pulse a mano. Así nunca se pierden datos en silencio.
+    ocultarBotonEnviar: true,
+    ocultarSelector: 'button.submit',   // qué se oculta dentro del problema del almacén
+    verificarGuardadoMs: 10000,
+
+    debug: false
+  };
+
+  // ---------------------------------------------------------------------
+  // ENUNCIADO (como antes)
+  // ---------------------------------------------------------------------
+  const enunciadoTarea = `WRITING TASK 2
 
 You are taking part in a study abroad programme at a European University. The International office of your University has asked you to write a report on your stay in order to improve the programme. You spoke to some of your fellow students and took some notes to help you:
 
 PROS of the UNI:
+
 - international students (interesting!)
+
 - good programmes (good for CV!)
+
 - language programmes
 
 CONS of the UNI:
+
 - expensive (limited grants)
+
 - Exams (too different!)
+
 - language barrier
 
 You should look at your notes and:
+
 ● Discuss what aspects of the University make it a good destination for International students.
+
 ● Explain what problems students might encounter during their stay.
+
 ● Suggest what advice the University should give to students taking part in the study abroad programme in the future.
 
 Write your report in 200-240 words.`;
 
-    // Format the template with the same structure as the one defined in the AI grader
-    const plantillaCompleta = `####TASK\n\n${enunciadoTarea}\n\n####ANSWER\n\n`;
+  // Misma estructura que la plantilla del AI grader
+  const plantillaCompleta = `####TASK\n\n${enunciadoTarea}\n\n####ANSWER\n\n`;
 
-    window.addEventListener("message", function(event) {
-        // Domain filter
-        if (!event.origin.includes('yourdomain.com')) return;
+  // ---------------------------------------------------------------------
+  // UTILIDADES
+  // ---------------------------------------------------------------------
+  const MAX_CAMPO = 30000; // caracteres máximos por campo de texto
 
-        if (event.data.accion === 'hijo_listo') {
-            const iframes = document.querySelectorAll('iframe');
-            iframes.forEach(f => {
-                f.contentWindow.postMessage({
-                    accion: 'rellenar_estudiante',
-                    texto: plantillaCompleta
-                }, '*');
-            });
+  function log() {
+    if (CONFIG.debug) console.log.apply(console, ['[lti-bridge]'].concat([].slice.call(arguments)));
+  }
+
+  // Solo aceptamos mensajes de ventanas que realmente son iframes de esta página
+  function esIframeDeLaPagina(win) {
+    return !!iframeDe(win);
+  }
+
+  function iframeDe(win) {
+    return Array.prototype.find.call(document.querySelectorAll('iframe'), function (f) {
+      return f.contentWindow === win;
+    }) || null;
+  }
+
+  // ¿Es este iframe el del problema jsinput que almacena las correcciones?
+  // Se exige que su src contenga storeSrcMatch y que el origen del mensaje sea "null"
+  // (iframe con sandbox) o el origen real de su src.
+  function esAlmacen(win, origin) {
+    const f = iframeDe(win);
+    if (!f || (f.getAttribute('src') || '').indexOf(CONFIG.storeSrcMatch) === -1) return false;
+    if (origin === 'null') return true;
+    try { return origin === new URL(f.src, window.location.href).origin; } catch (e) { return false; }
+  }
+
+  function texto(v) {
+    const s = (typeof v === 'string') ? v : (v == null ? '' : String(v));
+    return s.slice(0, MAX_CAMPO);
+  }
+
+  function nuevoId() {
+    return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  }
+
+  // Valida y normaliza lo que llega desde la herramienta (nunca nos fiamos del formato)
+  function normalizarIntento(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const respuesta = texto(raw.respuesta);
+    const correccion = texto(raw.correccion);
+    if (!respuesta && !correccion) return null;
+    return {
+      id: texto(raw.id) || nuevoId(),
+      fecha: texto(raw.fecha) || new Date().toISOString(),
+      enunciado: texto(raw.enunciado) || enunciadoTarea,
+      respuesta: respuesta,
+      correccion: correccion,
+      nota: texto(raw.nota)
+    };
+  }
+
+  // ---------------------------------------------------------------------
+  // COMUNICACIÓN CON EL PROBLEMA jsinput ("almacén")
+  // ---------------------------------------------------------------------
+  let storeWindow = null;
+  let modoManual = false;               // true = el botón queda visible y el alumno debe pulsarlo
+  let temporizadorVerificacion = null;
+  const CLASE_OCULTO = 'lti-bridge-oculto';
+  const ID_ESTILO = 'lti-bridge-estilo';
+
+  function ocultaBoton() {
+    return !!CONFIG.ocultarBotonEnviar && !!CONFIG.autoSubmitSelector && !modoManual;
+  }
+  const emisores = new Map();     // id -> {win, origin} de quien lo envió, para confirmarle
+  const sinConfirmar = new Map(); // id -> intento enviado al almacén y aún sin confirmar
+  let temporizador = null;
+
+  function buscarIframeAlmacen() {
+    return Array.prototype.find.call(document.querySelectorAll('iframe'), function (f) {
+      return (f.getAttribute('src') || '').indexOf(CONFIG.storeSrcMatch) !== -1;
+    }) || null;
+  }
+
+  // Envía al almacén todos los intentos sin confirmar. NO depende de que el almacén haya avisado
+  // antes: si su aviso se pierde, el puente localiza el iframe por su src (storeSrcMatch).
+  // '*' es obligatorio: el iframe sandbox tiene origen opaco ("null") y no admite otro targetOrigin.
+  // Solo viajan datos del propio alumno, y solo al iframe de esta página cuyo src coincide.
+  function empujarPendientes() {
+    const f = storeWindow ? null : buscarIframeAlmacen();
+    const win = storeWindow || (f ? f.contentWindow : null);
+    if (!win) { log('iframe del almacén no encontrado todavía'); return false; }
+    win.postMessage({ accion: 'puente_activo', ocultarBoton: ocultaBoton() }, '*');
+    sinConfirmar.forEach(function (intento) {
+      win.postMessage({ accion: 'anadir_intento', intento: intento }, '*');
+      log('intento enviado al almacén', intento.id);
+    });
+    return true;
+  }
+
+  function enviarAlAlmacen(intento) {
+    if (sinConfirmar.size < 50) sinConfirmar.set(intento.id, intento);
+    if (empujarPendientes()) {
+      // Respaldo: no depender de la confirmación del almacén para guardar en el LMS
+      setTimeout(function () {
+        if (!yaPulsado.has(intento.id)) { log('sin confirmación; se pulsa el botón de todos modos', intento.id); pulsarUnaVez(intento.id); }
+      }, CONFIG.autoSubmitFallbackMs);
+    }
+    if (temporizador) return;
+    let n = 0;
+    temporizador = setInterval(function () {
+      if (!sinConfirmar.size) { clearInterval(temporizador); temporizador = null; return; }
+      if (++n > 20) {
+        log('SIN confirmación del almacén tras 20 reintentos (30 s). ¿Carga el iframe de ' + CONFIG.storeSrcMatch + '?');
+        clearInterval(temporizador); temporizador = null; return;
+      }
+      empujarPendientes();
+    }, 1500);
+  }
+
+  const yaPulsado = new Set(); // ids de intento para los que ya se programó la pulsación
+  function pulsarUnaVez(id) {
+    if (yaPulsado.has(id)) return;
+    yaPulsado.add(id);
+    setTimeout(pulsarBotonDelProblema, CONFIG.autoSubmitDelayMs);
+  }
+
+  // Oculta el botón solo dentro del problema que contiene el iframe del almacén.
+  // La clase se pone en el contenedor del problema (que Open edX no sustituye al reenviar) y
+  // el CSS va en un <style> propio, de modo que sobrevive a que el problema se vuelva a pintar.
+  function aplicarOcultacion(win) {
+    if (!ocultaBoton()) return;
+    const f = iframeDe(win);
+    if (!f || !f.closest) return;
+    const cont = f.closest('.problems-wrapper') || f.closest('.problem') || f.closest('.xblock');
+    if (!cont) return;
+    if (!document.getElementById(ID_ESTILO)) {
+      const st = document.createElement('style');
+      st.id = ID_ESTILO;
+      st.textContent = '.' + CLASE_OCULTO + ' ' + CONFIG.ocultarSelector + ' { display: none !important; }';
+      document.head.appendChild(st);
+    }
+    cont.classList.add(CLASE_OCULTO);
+    const n = cont.querySelectorAll ? cont.querySelectorAll(CONFIG.ocultarSelector).length : '?';
+    log('ocultación aplicada. contenedor:', cont.className, '| botones con', CONFIG.ocultarSelector + ':', n);
+    if (n === 0) log('AVISO: no hay ningún botón que coincida con ocultarSelector dentro de ese contenedor');
+  }
+
+  // Salida de seguridad: vuelve a mostrar el botón y avisa al almacén para que guíe al alumno
+  function pasarAModoManual(motivo) {
+    if (modoManual) return;
+    modoManual = true;
+    log('MODO MANUAL: se muestra el botón de envío. Motivo:', motivo);
+    Array.prototype.forEach.call(document.querySelectorAll('.' + CLASE_OCULTO), function (e) {
+      e.classList.remove(CLASE_OCULTO);
+    });
+    if (storeWindow) storeWindow.postMessage({ accion: 'modo_manual' }, '*');
+  }
+
+  function pulsarBotonDelProblema() {
+    if (!CONFIG.autoSubmitSelector) return;
+    const btn = document.querySelector(CONFIG.autoSubmitSelector);
+    if (btn && !btn.disabled) {
+      btn.click();   // funciona aunque el botón esté oculto con CSS
+      log('botón del problema pulsado');
+      if (ocultaBoton()) {
+        // Tras un envío correcto Open edX vuelve a pintar el problema (llega un 'almacen_listo' de un iframe nuevo)
+        clearTimeout(temporizadorVerificacion);
+        temporizadorVerificacion = setTimeout(function () {
+          pasarAModoManual('el problema no se volvió a pintar tras pulsar el botón; no se confirma el guardado');
+        }, CONFIG.verificarGuardadoMs);
+      }
+    } else {
+      log('no se encontró el botón o está desactivado:', CONFIG.autoSubmitSelector);
+      pasarAModoManual('no se pudo pulsar el botón');
+    }
+  }
+
+  log('puente cargado. toolOrigins=', CONFIG.toolOrigins, 'storeSrcMatch=', CONFIG.storeSrcMatch,
+      'iframes en la página:', Array.prototype.map.call(document.querySelectorAll('iframe'), function (f) { return f.getAttribute('src'); }));
+
+  // ---------------------------------------------------------------------
+  // LISTENER ÚNICO
+  // ---------------------------------------------------------------------
+  window.addEventListener('message', function (event) {
+    const d = event.data;
+    if (!d || typeof d !== 'object' || typeof d.accion !== 'string') return;
+    log('mensaje recibido:', d.accion, '| origin=', event.origin);
+
+    // IMPORTANTE: el mensaje se atribuye por la IDENTIDAD del iframe (su src), no solo por el origen.
+    // El almacén y la herramienta suelen estar en el MISMO servidor (mismo origen), así que el
+    // origen por sí solo no distingue quién envía.
+    const esMensajeDelAlmacen = d.accion === 'almacen_listo' || d.accion === 'intento_guardado';
+    const esMensajeDeLaHerramienta = d.accion === 'hijo_listo' || d.accion === 'guardar_correccion';
+
+    // --- Mensajes del problema jsinput ---------------------------------
+    if (esMensajeDelAlmacen) {
+      if (!esAlmacen(event.source, event.origin)) {
+        const f = iframeDe(event.source);
+        log('mensaje', d.accion, 'DESCARTADO. origin=', event.origin,
+            '| iframe de esta página:', !!f, '| src=', f ? f.getAttribute('src') : '(no es un iframe de esta página)',
+            '| se espera que el src contenga:', CONFIG.storeSrcMatch);
+        return;
+      }
+      // ¿Es un iframe nuevo? (Open edX repinta el problema tras un envío correcto) -> guardado confirmado
+      if (storeWindow && event.source !== storeWindow && temporizadorVerificacion) {
+        clearTimeout(temporizadorVerificacion);
+        temporizadorVerificacion = null;
+        log('guardado en el LMS confirmado: el problema se volvió a pintar');
+      }
+      storeWindow = event.source; // verificado por esAlmacen()
+      aplicarOcultacion(event.source);
+      if (d.accion === 'almacen_listo') {
+        log('almacén detectado; puente activo');
+        empujarPendientes();
+      } else {
+        // 'intento_guardado': ignorar duplicados o ids desconocidos (los reintentos provocan confirmaciones repetidas)
+        if (typeof d.id !== 'string' || !sinConfirmar.has(d.id)) return;
+        sinConfirmar.delete(d.id);
+        log('almacén confirmó el intento', d.id, '(total almacenado:', d.total + ')');
+        // Confirmación a la herramienta: el almacén jsinput ya lo tiene (aún no está en la BD del LMS)
+        const em = emisores.get(d.id);
+        if (em) {
+          em.win.postMessage({ accion: 'correccion_almacenada', id: d.id, total: d.total }, em.origin);
+          emisores.delete(d.id);
         }
-    }, false);
+        pulsarUnaVez(d.id);
+      }
+      return;
+    }
+
+    // --- Mensajes de la herramienta LTI --------------------------------
+    if (esMensajeDeLaHerramienta) {
+      const fuenteValida = CONFIG.toolOrigins.indexOf(event.origin) !== -1 &&
+                           esIframeDeLaPagina(event.source) &&
+                           !esAlmacen(event.source, event.origin); // el almacén nunca actúa como herramienta
+      if (!fuenteValida) {
+        log('mensaje', d.accion, 'DESCARTADO. origin=', event.origin, '(toolOrigins=', CONFIG.toolOrigins, ') | iframe de esta página:', esIframeDeLaPagina(event.source));
+        return;
+      }
+      if (d.accion === 'hijo_listo') {
+        event.source.postMessage({ accion: 'rellenar_estudiante', texto: plantillaCompleta }, event.origin);
+      } else {
+        const intento = normalizarIntento(d.intento);
+        if (intento) {
+          if (emisores.size < 100) emisores.set(intento.id, { win: event.source, origin: event.origin });
+          enviarAlAlmacen(intento);
+        }
+      }
+    }
+  }, false);
+
 })();
+
 </script>
+
 </p>

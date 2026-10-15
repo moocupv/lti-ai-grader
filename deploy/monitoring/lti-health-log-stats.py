@@ -109,7 +109,7 @@ def main():
                     launches[activity] += 1
                     total_launches += 1
 
-                if "/cgi-bin/evaluate-" in target:
+                if "/cgi-bin/evalua" in target:
                     activity = normalize_activity_from_referer(match.group("referer"))
                     corrections[activity] += 1
                     statuses[activity][status] += 1

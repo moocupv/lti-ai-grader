@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<!--
+  ALMACÉN jsinput para Open edX
+
+  DÓNDE ALOJARLO  (importante)
+  Desde septiembre de 2026 Open edX sirve TODOS los ficheros de "Archivos y cargas" con la
+  cabecera "Content-Security-Policy: sandbox" (sin allow-scripts), por lo que un html_file
+  subido ahí deja de ejecutar JavaScript. Por eso este fichero se aloja en TU servidor
+  (el mismo del evaluador LTI), junto a jschannel.js, y el problema lo referencia con una URL
+  absoluta y sop="false" (modo documentado por Open edX para html_file externos).
+
+  Colócalo en la raíz web de tu servidor, en la misma carpeta que jschannel.js:
+      https://TU-SERVIDOR/jsinput_store.html
+      https://TU-SERVIDOR/jschannel.js
+
+  jschannel.js (Mozilla, MPL 1.1/GPL 2.0/LGPL 2.1) NO se incluye en este repositorio:
+  ver openedx/README.md (descarga con commit y sha256 fijados).
+-->
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Registro de correcciones</title>
+  <style>
+    body { font: 14px/1.4 system-ui, sans-serif; margin: 8px; color: #222; }
+    .ok   { color: #0a6b2b; }
+    .warn { color: #8a5a00; }
+    .err  { color: #a00; }
+  </style>
+  <script src="jschannel.js"></script>   <!-- misma carpeta que este fichero -->
+</head>
+<body>
+<div id="estado">…</div>
+
+<script>
+(function () {
+  'use strict';
+
+  const MAX_INTENTOS = 100;
+
+  const LANG = (navigator.language || 'es').slice(0, 2) === 'en' ? 'en' : 'es';
+  const T = {
+    es: {
+      count: 'Correcciones registradas: ',
+      pending: 'Hay {n} sin guardar en el curso. Pulsa «Enviar» (Submit) del problema para guardarlas.',
+      pendingAuto: 'Guardando en tu registro del curso…',
+      saved: 'Todas guardadas en tu registro del curso.',
+      noBridge: 'Aviso: no se detecta el componente puente. Las correcciones NO se almacenarán.',
+      noChannel: 'Error: jschannel.js no se ha cargado. Revisa su URL en jsinput_store.html.',
+      limit: 'Se alcanzó el límite de intentos almacenables.'
+    },
+    en: {
+      count: 'Corrections recorded: ',
+      pending: '{n} not yet saved to the course. Click "Submit" on the problem to save them.',
+      pendingAuto: 'Saving to your course record…',
+      saved: 'All saved to your course record.',
+      noBridge: 'Warning: bridge component not detected. Corrections will NOT be stored.',
+      noChannel: 'Error: jschannel.js failed to load. Check its URL in jsinput_store.html.',
+      limit: 'The maximum number of stored attempts has been reached.'
+    }
+  }[LANG];
+
+  let intentos = [];
+  let pendientes = 0;
+  let puenteActivo = false;
+  let ocultarBoton = false;  // el puente pulsa Enviar por el alumno
+  let modoManual = false;    // el puente no pudo: el alumno debe pulsar Enviar
+  let aviso = '';   // { texto, clase }
+
+  // ------------------------------------------------------------------
+  // Estado
+  // ------------------------------------------------------------------
+  function ordenar() {
+    intentos.sort(function (a, b) {
+      const fa = a.fecha || '', fb = b.fecha || '';
+      return fa < fb ? -1 : fa > fb ? 1 : 0;
+    });
+  }
+
+  // Añade solo los intentos cuyo id no existe aún (evita duplicados y pérdidas)
+  function fusionar(lista) {
+    const ids = new Set(intentos.map(function (i) { return i.id; }));
+    let nuevos = 0;
+    lista.forEach(function (i) {
+      if (i && typeof i === 'object' && i.id && !ids.has(i.id)) {
+        intentos.push(i);
+        ids.add(i.id);
+        nuevos++;
+      }
+    });
+    ordenar();
+    return nuevos;
+  }
+
+  function serializar() {
+    // jsinput.js de Open edX aplica decodeURI() a lo que devolvemos; un '%' suelto (p. ej. "un 20% de...")
+    // lanza "URIError: URI malformed" y el envío falla. Se escribe como \u0025, que es JSON válido
+    // y JSON.parse() restaura como '%'. Un texto sin '%' nunca hace fallar a decodeURI().
+    return JSON.stringify({ v: 1, intentos: intentos }).replace(/%/g, '\\u0025');
+  }
+
+  function pintar() {
+    const el = document.getElementById('estado');
+    el.textContent = '';
+    const l1 = document.createElement('div');
+    l1.textContent = T.count + intentos.length;
+    el.appendChild(l1);
+
+    const l2 = document.createElement('div');
+    if (pendientes > 0) {
+      l2.className = 'warn';
+      l2.textContent = (ocultarBoton && !modoManual) ? T.pendingAuto : T.pending.replace('{n}', pendientes);
+    } else if (intentos.length > 0) {
+      l2.className = 'ok';
+      l2.textContent = T.saved;
+    }
+    el.appendChild(l2);
+
+    if (aviso) {
+      const l3 = document.createElement('div');
+      l3.className = aviso.clase;
+      l3.textContent = aviso.texto;
+      el.appendChild(l3);
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Canal con el LMS (jsinput)
+  //   getGrade  -> se guarda en student_answers (sale en el informe de respuestas)
+  //   getState  -> se guarda en input_state (sirve para restaurar al volver)
+  //   setState  -> el LMS nos devuelve el estado guardado al cargar el problema
+  // ------------------------------------------------------------------
+  function getGrade() {
+    pendientes = 0;
+    pintar();
+    return serializar();   // cadena JSON -> student_answers
+  }
+
+  function getState() {
+    return serializar();   // cadena JSON -> input_state
+  }
+
+  function setState() {
+    // jschannel entrega (transaccion, parametro); sin jschannel solo el parametro
+    const s = arguments.length === 1 ? arguments[0] : arguments[1];
+    try {
+      const o = JSON.parse(s);
+      if (o && Array.isArray(o.intentos)) fusionar(o.intentos);
+    } catch (e) { /* estado vacio o inicial */ }
+    pintar();
+  }
+
+  // Mismos nombres que usa el problema en gradefn / get_statefn / set_statefn
+  window.AlmacenCorrecciones = { getGrade: getGrade, getState: getState, setState: setState };
+
+  if (typeof Channel === 'undefined') {
+    aviso = { texto: T.noChannel, clase: 'err' };
+  } else if (window.parent !== window) {
+    const channel = Channel.build({ window: window.parent, origin: '*', scope: 'JSInput' });
+    channel.bind('getGrade', getGrade);
+    channel.bind('getState', getState);
+    channel.bind('setState', setState);
+  }
+
+  // ------------------------------------------------------------------
+  // Mensajes del componente HTML puente (misma página)
+  // ------------------------------------------------------------------
+  window.addEventListener('message', function (event) {
+    if (event.source !== window.parent) return;
+    const d = event.data;
+    if (!d || typeof d !== 'object') return;
+
+    if (d.accion === 'modo_manual') {
+      modoManual = true;
+      pintar();
+    } else if (d.accion === 'puente_activo') {
+      puenteActivo = true;
+      ocultarBoton = !!d.ocultarBoton;
+      aviso = '';
+      pintar();
+    } else if (d.accion === 'anadir_intento') {
+      puenteActivo = true; aviso = '';  // recibir un intento demuestra que el puente existe
+      if (intentos.length >= MAX_INTENTOS) {
+        aviso = { texto: T.limit, clase: 'err' };
+        pintar();
+        return;
+      }
+      const n = d.intento ? fusionar([d.intento]) : 0;
+      pendientes += n;
+      pintar();
+      window.parent.postMessage(
+        { accion: 'intento_guardado', id: d.intento && d.intento.id, total: intentos.length }, '*');
+    }
+  }, false);
+
+  // Avisamos al puente de que estamos listos; reintentamos por si el iframe
+  // cargó antes de que el puente estuviera escuchando.
+  let pings = 0;
+  function ping() {
+    if (puenteActivo) return;
+    pings++;
+    if (pings === 30) {
+      aviso = { texto: T.noBridge, clase: 'warn' };
+      pintar();
+    }
+    window.parent.postMessage({ accion: 'almacen_listo' }, '*');
+    setTimeout(ping, pings < 30 ? 1000 : 5000); // sigue avisando, más despacio, mientras no haya puente
+  }
+
+  pintar();
+  ping();
+})();
+</script>
+</body>
+</html>

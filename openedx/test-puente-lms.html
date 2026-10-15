@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<!--
+  PÁGINA DE PRUEBA del puente con Open edX (no usa el modelo de IA).
+  Simula lo que hace aigrader.js tras una corrección: handshake con el componente HTML puente
+  y envío de un "guardar_correccion" con datos de ejemplo.
+  Despliégala junto a los demás HTML (/usr/share/nginx/html, modo 644). Bórrala al terminar.
+-->
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Prueba del puente LMS</title>
+<style>
+  body { font: 14px/1.5 system-ui, sans-serif; margin: 12px; color: #222; }
+  h3 { margin: 0 0 8px; }
+  .paso { margin: 4px 0; } .ok { color: #0a6b2b; } .err { color: #a00; } .warn { color: #8a5a00; } .pend { color: #666; }
+  button { padding: 8px 16px; font-size: 14px; margin: 8px 0; cursor: pointer; }
+  button:disabled { cursor: not-allowed; }
+  #log { font: 12px/1.4 ui-monospace, monospace; background: #f4f4f4; padding: 8px; max-height: 160px; overflow: auto; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h3>Prueba del puente con el LMS</h3>
+<div class="paso pend" id="p1">1. Conexión con el componente HTML puente: esperando…</div>
+<button id="btn" disabled>Enviar corrección de prueba al LMS</button>
+<div class="paso pend" id="p2">2. Confirmación del almacén jsinput: sin enviar aún</div>
+<div id="log"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  // Igual que CONFIG.allowedOrigins del HTML del corrector: orígenes de tu Open edX (LMS y Studio)
+  const ALLOWED_ORIGINS = ['https://youropenedx.es', 'https://studio.youropenedx.es'];
+
+  let lmsOrigin = null;
+  let enviados = 0;
+
+  const $ = (id) => document.getElementById(id);
+  function paso(id, cls, texto) { const e = $(id); e.className = 'paso ' + cls; e.textContent = texto; }
+  function log(msg) { const l = $('log'); l.textContent += new Date().toLocaleTimeString() + '  ' + msg + '\n'; l.scrollTop = l.scrollHeight; }
+  const norm = (o) => String(o).replace(/\/+$/, '');
+
+  window.addEventListener('message', function (event) {
+    if (event.source !== window.parent) return;
+    const d = event.data;
+    if (!d || typeof d !== 'object') return;
+
+    if (!ALLOWED_ORIGINS.some((o) => norm(o) === event.origin)) {
+      log('Mensaje IGNORADO de origen no permitido: ' + event.origin + '  (añádelo a ALLOWED_ORIGINS)');
+      return;
+    }
+    if (d.accion === 'rellenar_estudiante') {
+      lmsOrigin = event.origin;
+      paso('p1', 'ok', '1. Conexión con el puente: OK (origen del LMS: ' + lmsOrigin + ')');
+      $('btn').disabled = false;
+      log('Recibido rellenar_estudiante (' + (d.texto ? d.texto.length : 0) + ' caracteres de plantilla)');
+    } else if (d.accion === 'correccion_almacenada') {
+      paso('p2', 'ok', '2. Almacén jsinput: OK, intento ' + d.id + ' recibido (total almacenado: ' + d.total + ')');
+      log('Confirmación del almacén. Total: ' + d.total + '. Ahora el puente pulsa Submit del problema.');
+    }
+  });
+
+  $('btn').addEventListener('click', function () {
+    enviados++;
+    const id = 'prueba-' + Date.now().toString(36) + '-' + enviados;
+    window.parent.postMessage({
+      accion: 'guardar_correccion',
+      intento: {
+        id: id,
+        fecha: new Date().toISOString(),
+        enunciado: 'Enunciado de prueba (WRITING TASK)',
+        respuesta: 'Respuesta de prueba número ' + enviados + ' con acentos: canción, ñandú.',
+        correccion: 'FINAL_GRADE: 3/5\nCorrección simulada número ' + enviados + '. No ha intervenido ningún modelo.',
+        nota: '3/5'
+      }
+    }, lmsOrigin);
+    paso('p2', 'warn', '2. Enviado el intento ' + id + '; esperando confirmación del almacén…');
+    log('Enviado guardar_correccion ' + id);
+    setTimeout(function () {
+      if ($('p2').className.indexOf('warn') !== -1) {
+        paso('p2', 'err', '2. SIN confirmación tras 6 s: el problema jsinput no ha respondido al puente.');
+        log('Revisa: problema jsinput en la misma unidad, storeSrcMatch, que jsinput_store.html cargue (200) y la consola del navegador.');
+      }
+    }, 6000);
+  });
+
+  // Handshake, como hace aigrader.js
+  window.parent.postMessage({ accion: 'hijo_listo' }, '*');
+  log('Enviado hijo_listo');
+  setTimeout(function () {
+    if (!lmsOrigin) {
+      paso('p1', 'err', '1. SIN respuesta del puente tras 4 s.');
+      log('Revisa: componente HTML puente colocado en la unidad, toolOrigins con el origen de este servidor, y que no sea una vista sin LMS.');
+    }
+  }, 4000);
+})();
+</script>
+</body>
+</html>

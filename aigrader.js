@@ -1,5 +1,5 @@
 /**
- * 🛠️ AIGRADER ENGINE v2.6
+ * 🛠️ AIGRADER ENGINE v2.7 (optional return of answer + AI correction to the LMS; feedback rendered as plain text)
  */
 
 const EvaluatorEngine = {
@@ -121,6 +121,9 @@ const EvaluatorEngine = {
             localStorage.setItem('lti_session_token', this.token);
         }
 
+        // LMS bridge (optional, see CONFIG.saveToLms): origin of the parent page, learned from its first message
+        this.lmsOrigin = null;
+
         this.renderUI();
         this.bindEvents();
         this.setupPostMessage();
@@ -184,6 +187,14 @@ const EvaluatorEngine = {
 
                 const res = JSON.parse(rawText.substring(start, end));
                 this.showFeedback(res.success ? res.feedback : this.txt.serverError + res.error, res.success);
+                if (res.success) {
+                    this.sendCorrectionToLms({
+                        fullText: text,
+                        template: templateToCompare,
+                        feedback: res.feedback,
+                        scoreInfo: res.score_info
+                    });
+                }
             } catch (err) {
                 this.showFeedback(this.txt.connError + err.message, false);
             } finally {
@@ -219,11 +230,48 @@ const EvaluatorEngine = {
 
     showFeedback(content, isSuccess) {
         const fb = document.getElementById('feedback');
-        document.getElementById('feedback-content').innerHTML = content;
+        // SECURITY: LLM output and server/connection errors are untrusted text. textContent never parses HTML,
+        // so markup echoed by the model (or injected via the student's text) cannot run scripts.
+        // Line breaks are preserved by the CSS rule `white-space: pre-wrap` on .feedback.
+        document.getElementById('feedback-content').textContent = String(content);
         fb.className = `feedback ${isSuccess ? 'success' : 'error'}`;
         fb.style.display = 'block';
         document.getElementById('new-eval-section').style.display = 'block';
         fb.scrollIntoView({ behavior: 'smooth' });
+    },
+
+    // 📤 OPTIONAL: send student answer + AI correction back to the LMS page (postMessage).
+    // The parent HTML component (javascript-for-openedx.html) stores it in a jsinput problem.
+    sendCorrectionToLms({ fullText, template, feedback, scoreInfo }) {
+        if (!CONFIG.saveToLms || !this.lmsOrigin || window.parent === window) return false;
+
+        // Same check as the server: an untouched template is not a real submission, nothing to store
+        const clean = (t) => String(t || '').replace(/\s+/g, '');
+        if (clean(fullText) === clean(template)) return false;
+
+        // Split "####TASK ... ####ANSWER ..." template
+        const marker = '####ANSWER';
+        const idx = fullText.indexOf(marker);
+        const task = idx === -1 ? '' : fullText.slice(0, idx).replace('####TASK', '').trim();
+        const answer = (idx === -1 ? fullText : fullText.slice(idx + marker.length)).trim();
+
+        const hasScore = scoreInfo && scoreInfo.score !== null && scoreInfo.score !== undefined;
+        const grade = hasScore ? `${scoreInfo.score}/${scoreInfo.max}` : '';
+
+        window.parent.postMessage({
+            accion: 'guardar_correccion',
+            intento: {
+                id: Date.now().toString(36) + Math.random().toString(36).slice(2, 8),
+                fecha: new Date().toISOString(),
+                enunciado: task,
+                respuesta: answer,
+                correccion: String(feedback || ''),
+                nota: grade
+            }
+        }, this.lmsOrigin);
+
+        if (CONFIG.debug) console.log("Correction sent to LMS bridge", grade);
+        return true;
     },
 
 	setupPostMessage() {
@@ -235,15 +283,20 @@ const EvaluatorEngine = {
 
         // 3. Listen messages with dynamic validation
         window.addEventListener("message", (event) => {
-            // ✅ Check if message origin is in our whitelist
-            const isAuthorized = allowed.some(origin => event.origin.startsWith(origin));
+            // ✅ Only the parent page, and only an origin in our whitelist (exact match, trailing slash tolerated)
+            if (event.source !== window.parent) return;
+            const normalize = (o) => String(o).replace(/\/+$/, '');
+            const isAuthorized = allowed.some(origin => normalize(origin) === event.origin);
             
             if (!isAuthorized) {
                 if (CONFIG.debug) console.warn("Blocked message from unauthorized origin:", event.origin);
                 return;
             }
 
+            if (!event.data || typeof event.data !== 'object') return;
+
             if (event.data.accion === 'rellenar_estudiante') {
+                this.lmsOrigin = event.origin; // used to address the LMS bridge messages
                 const campo = document.getElementById('student-input');
                 if (campo) {
 					this.currentValueFromLMS = event.data.texto;

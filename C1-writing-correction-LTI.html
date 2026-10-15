@@ -18,6 +18,9 @@
             placeholder: "Type your text here...",
             evaluatorUrl: '/cgi-bin/evaluate-certacles-writing-c1-LTI-conf.py',
             privacyUrl: "/evaluator_privacy_policy_Certacles_C1.html",
+            // Optional (Open edX): send student answer + AI correction back to the LMS page so a jsinput
+            // problem can store it per student. Requires javascript-for-openedx.html and the jsinput problem.
+            saveToLms: false,
             debug: false
         };
     </script>
