@@ -30,7 +30,14 @@ METRICS="$LOG_DIR/metrics-$(date '+%Y-%m').csv"
 if [ ! -f "$METRICS" ]; then
     issues+=("Current metrics file does not exist: $METRICS")
 else
-    last_epoch="$(tail -n 1 "$METRICS" | cut -d, -f1 | xargs -r date -d 2>/dev/null +%s || true)"
+    # The timestamp is "YYYY-MM-DD HH:MM:SS" (it contains a space), so it must be passed to date as
+    # ONE quoted argument. Piping it through xargs split it in two and the parse always failed.
+    # It is validated first because `date -d ""` silently returns midnight instead of failing.
+    last_ts="$(tail -n 1 "$METRICS" | cut -d, -f1)"
+    last_epoch=""
+    if [[ "$last_ts" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}\ [0-9]{2}:[0-9]{2}:[0-9]{2}$ ]]; then
+        last_epoch="$(date -d "$last_ts" +%s 2>/dev/null || true)"
+    fi
     now_epoch="$(date +%s)"
     if [ -z "$last_epoch" ]; then
         issues+=("Could not parse timestamp from the last metrics sample")
