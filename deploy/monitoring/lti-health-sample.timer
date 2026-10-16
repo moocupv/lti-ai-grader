@@ -2,9 +2,10 @@
 Description=Sample LTI AI Grader health every 30 seconds
 
 [Timer]
-OnBootSec=30s
-OnUnitActiveSec=30s
-AccuracySec=5s
+# Wall-clock schedule (at :00 and :30 of every minute). The previous OnUnitActiveSec=30s +
+# AccuracySec=5s drifted to ~34-35 s per sample (about 2,520 samples/day instead of 2,880).
+OnCalendar=*-*-* *:*:00,30
+AccuracySec=1s
 
 [Install]
 WantedBy=timers.target
