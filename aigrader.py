@@ -1,23 +1,30 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 # -*- coding: utf-8 -*-
 
-import os
-import sys
 import json
-import re
+import sys
+import os
 import time
-import uuid
-import hmac
-import hashlib
-import base64
+import cgitb
 import urllib.request
 import urllib.parse
+import urllib.error
+import re
+import hashlib
+import hmac
+import base64
+import uuid
+import io
 from urllib.parse import urlparse
 
-def setup_environment(debug_mode=False):
+# Enforce UTF-8 to prevent formatting errors with long rubrics.
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+
+def setup_environment(debug_mode):
     if debug_mode:
-        import cgitb
         cgitb.enable()
+    else:
+        sys.tracebacklimit = 0
 
 def log_debug(message, config):
     if config.get("DEBUG"):
@@ -65,20 +72,16 @@ def is_safe_url(url, allowed_domains_str):
     try:
         if not url:
             return False, "URL vacía"
-
         parsed_url = urlparse(url)
         if parsed_url.scheme != 'https':
             return False, "Only HTTPS connections"
-
         allowed_list = [d.strip().lower() for d in allowed_domains_str.split(",") if d.strip()]
         domain = (parsed_url.hostname or parsed_url.netloc).lower()
-
         if any(domain == d or domain.endswith('.' + d) for d in allowed_list):
             return True, url
-
         return False, f"Non authorised domain: {domain}"
     except Exception as e:
-        sys.stderr.write(f"[is_safe_url ERROR] {type(e).__name__}: {str(e)}\n")
+        sys.stderr.write(f"[DEBUG is_safe_url ERROR] {type(e).__name__}: {str(e)}\n")
         return False, "Error in URL processing"
 
 def extract_flexible_grade(text, grade_identifier):
@@ -169,7 +172,7 @@ def call_ai_api(student_input, config):
                 ],
                 "temperature": 0.2
             }
-        else:  # Google
+        else: # Google
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{config['model_name']}:generateContent?key={config['api_key']}"
             headers = {'Content-Type': 'application/json'}
             body = {"contents": [{"parts": [{"text": f"{config['system_instructions']}\n\nStudent Text:\n{student_input}"}]}]}
@@ -208,8 +211,9 @@ def run(config):
     sys.stdout.write(f"Access-Control-Allow-Origin: {header_origin}\n")
     sys.stdout.write("Access-Control-Allow-Methods: POST, OPTIONS\n")
     sys.stdout.write("Access-Control-Allow-Headers: Content-Type\n\n")
+    sys.stdout.flush()
 
-    if os.environ.get('REQUEST_METHOD', '').upper() == 'OPTIONS':
+    if os.environ.get('REQUEST_METHOD') == 'OPTIONS':
         return
 
     try:
@@ -255,7 +259,7 @@ def run(config):
                             lti_params.get('lis_outcome_service_url'),
                             lti_params.get('lis_result_sourcedid'),
                             lti_params.get('oauth_consumer_key'),
-                            score / maximum if maximum > 0 else 0,
+                            score/maximum if maximum > 0 else 0,
                             config
                         )
                         if not grade_sent:
@@ -264,8 +268,7 @@ def run(config):
                     log_event("session_missing")
 
             sys.stdout.write(json.dumps({
-                'success': True,
-                'feedback': feedback,
+                'success': True, 'feedback': feedback,
                 'score_info': {'score': score, 'max': maximum},
                 'lti_notified': grade_sent
             }, ensure_ascii=False))
@@ -277,3 +280,4 @@ def run(config):
         sys.stdout.write(json.dumps({'success': False, 'error': str(e)}))
 
     sys.stdout.flush()
+
