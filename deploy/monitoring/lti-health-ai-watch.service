@@ -1,0 +1,7 @@
+[Unit]
+Description=LTI AI Grader: alert when the AI provider fails repeatedly
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/lti-health/mail.env
+ExecStart=/usr/local/sbin/lti-health-ai-events.py watch

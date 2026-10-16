@@ -19,6 +19,7 @@ for script in \
     lti-health-weekly.sh \
     lti-health-watchdog.sh \
     lti-health-log-stats.py \
+    lti-health-ai-events.py \
     lti-health-send-mail.py; do
     install -m 0755 "$MONITOR_DIR/$script" "/usr/local/sbin/$script"
 done
@@ -30,6 +31,8 @@ for unit in \
     lti-health-daily.timer \
     lti-health-weekly.service \
     lti-health-weekly.timer \
+    lti-health-ai-watch.service \
+    lti-health-ai-watch.timer \
     lti-health-watchdog.service \
     lti-health-watchdog.timer; do
     install -m 0644 "$MONITOR_DIR/$unit" "/etc/systemd/system/$unit"
@@ -47,6 +50,7 @@ systemctl daemon-reload
 systemctl enable --now lti-health-sample.timer
 systemctl enable --now lti-health-daily.timer
 systemctl enable --now lti-health-weekly.timer
+systemctl enable --now lti-health-ai-watch.timer
 systemctl enable --now lti-health-watchdog.timer
 
 # Take one immediate sample and watchdog pass so installation can be verified at once.

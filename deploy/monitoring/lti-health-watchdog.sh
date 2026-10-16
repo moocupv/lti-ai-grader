@@ -22,6 +22,7 @@ check_active() {
 check_active lti-health-sample.timer
 check_active lti-health-daily.timer
 check_active lti-health-weekly.timer
+check_active lti-health-ai-watch.timer
 check_active lti-health-watchdog.timer
 # fcgiwrap is socket-activated: the *service* only runs after the first request following a
 # boot or restart, so "fcgiwrap.service inactive" is normal while idle. What must always be up

@@ -371,6 +371,7 @@ The installer enables:
 lti-health-sample.timer      # sample every 30 seconds
 lti-health-daily.timer       # daily report at 00:10
 lti-health-weekly.timer      # weekly report every Monday at 08:00
+lti-health-ai-watch.timer    # AI provider alert check every 5 minutes
 lti-health-watchdog.timer    # health check every hour
 ```
 
@@ -470,6 +471,42 @@ To test the Nginx usage parser for a specific day:
 ```bash
 sudo /usr/local/sbin/lti-health-log-stats.py --start 2026-09-29 --end 2026-09-29
 ```
+
+### AI provider failures: report section and e-mail alert
+
+The evaluator CGI scripts always answer HTTP 200, even when the AI provider fails (the error is inside the JSON), so the Nginx access log cannot show provider outages. To make them visible, `aigrader.py` writes **one line per AI call** to stderr, which Nginx already keeps in its error log (no extra file or permission is needed):
+
+```text
+[lti-ai-grader] event=ai_error ts=2026-10-16T01:53:59+0200 script=evalua-x.py provider=openai model=poligpt-code kind=HTTPError code=500 ms=25 detail=...
+```
+
+| Event | Meaning |
+| :--- | :--- |
+| `ai_ok` | The provider answered (with the response time in `ms`) |
+| `ai_error` | The call failed: HTTP error (with the provider's own message), timeout, no connection, malformed answer |
+| `no_grade` | The model answered but without the grade line (nothing is sent to the LMS) |
+| `lms_grade_failed` | The grade could not be delivered to the LMS |
+| `session_missing` | A session token was sent but its session file does not exist |
+| `cgi_error` | Unexpected error in the grader |
+
+Events never contain the student's text, and API keys or bearer tokens that appear in an error message are masked. The daily and weekly reports get an **AI PROVIDER** section: calls, errors and error rate, errors grouped by cause, a table by evaluator script, response times (median, p95, maximum) and, in the weekly report, a day-by-day table.
+
+`lti-health-ai-watch.timer` runs `lti-health-ai-events.py watch` every 5 minutes. When the last **3** AI calls in a row failed (all within the last **30** minutes) it sends **one** e-mail with the most recent error, the evaluators affected and the last successful call, and it sends **one more** when a call succeeds again. Failures mixed with successful calls do not trigger it, and it does not repeat while the outage continues. If the e-mail cannot be sent, the service ends with an error and tries again on the next run. Without SMTP configured nothing is sent, and the message is only saved in `/var/log/lti-health/ai-alert.txt`. The thresholds can be changed in `/etc/lti-health/mail.env`:
+
+```text
+AI_ALERT_CONSECUTIVE=3
+AI_ALERT_WINDOW_MIN=30
+```
+
+This needs the updated `aigrader.py` in `/usr/lib/cgi-bin/` (compare it with your installed copy first, since it may contain local settings). Useful commands:
+
+```bash
+sudo /usr/local/sbin/lti-health-ai-events.py report --start 2026-10-12 --end 2026-10-16
+sudo /usr/local/sbin/lti-health-ai-events.py watch --dry-run   # shows what it would do, sends nothing
+sudo grep 'lti-ai-grader\] event=ai_error' /var/log/nginx/error.log | tail
+```
+
+The statistics only cover the period for which Nginx keeps its error log. The reports also show the fcgiwrap pools as "most processes seen" (workers plus one master) and the samples with no process; `fcgiwrap` is socket-activated, so after a reboot a pool is not running until its first request.
 
 Monitoring data older than approximately 400 days is removed by the daily job. Monitoring is optional and can be disabled without affecting the grader:
 

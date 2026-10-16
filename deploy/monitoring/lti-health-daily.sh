@@ -48,10 +48,15 @@ zgrep -h "$ERROR_DAY" /var/log/nginx/error.log* 2>/dev/null > "$TMP_ERRORS" || t
         awk -F, '{if($6>m)m=$6} END{print m+0}' "$TMP_METRICS"
         echo -n "Maximum simultaneous LTI receiver processes: "
         awk -F, '{if($7>m)m=$7} END{print m+0}' "$TMP_METRICS"
-        echo -n "Minimum observed main fcgiwrap process count: "
-        awk -F, 'NR==1{m=$8} $8<m{m=$8} END{print m+0}' "$TMP_METRICS"
-        echo -n "Minimum observed receiver fcgiwrap process count: "
-        awk -F, 'NR==1{m=$9} $9<m{m=$9} END{print m+0}' "$TMP_METRICS"
+        echo -n "fcgiwrap main pool, most processes seen (workers + 1 master): "
+        awk -F, '{if($8>m)m=$8} END{print m+0}' "$TMP_METRICS"
+        echo -n "fcgiwrap main pool, samples with no process (not started yet): "
+        awk -F, '$8==0{c++} END{print c+0 " of " NR}' "$TMP_METRICS"
+        echo -n "fcgiwrap receiver pool, most processes seen (workers + 1 master): "
+        awk -F, '{if($9>m)m=$9} END{print m+0}' "$TMP_METRICS"
+        echo -n "fcgiwrap receiver pool, samples with no process (not started yet): "
+        awk -F, '$9==0{c++} END{print c+0 " of " NR}' "$TMP_METRICS"
+        echo "(fcgiwrap is socket-activated: after a reboot a pool only starts with its first request.)"
         echo
 
         echo "---------------- SOCKET QUEUES ----------------"
@@ -75,6 +80,11 @@ zgrep -h "$ERROR_DAY" /var/log/nginx/error.log* 2>/dev/null > "$TMP_ERRORS" || t
     echo
     echo "---------------- LTI USAGE ----------------"
     /usr/local/sbin/lti-health-log-stats.py --start "$DAY" --end "$DAY" 2>&1 || echo "Could not calculate LTI usage statistics."
+
+    echo
+    echo "---------------- AI PROVIDER ----------------"
+    /usr/local/sbin/lti-health-ai-events.py report --start "$DAY" --end "$DAY" 2>&1 \
+        || echo "Could not calculate AI event statistics."
 
     echo
     echo "Metrics file: $METRICS"

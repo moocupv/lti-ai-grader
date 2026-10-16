@@ -15,6 +15,7 @@ LOG_DIR="${LTI_HEALTH_LOG_DIR:-/var/log/lti-health}"
 NGINX_LOG_DIR="${LTI_HEALTH_NGINX_LOG_DIR:-/var/log/nginx}"
 STATS_BIN="${LTI_HEALTH_STATS_BIN:-/usr/local/sbin/lti-health-log-stats.py}"
 MAIL_BIN="${LTI_HEALTH_MAIL_BIN:-/usr/local/sbin/lti-health-send-mail.py}"
+AI_EVENTS_BIN="${LTI_HEALTH_AI_EVENTS_BIN:-/usr/local/sbin/lti-health-ai-events.py}"
 
 note() {
     echo "$*"
@@ -120,10 +121,15 @@ done
         awk -F, '{if($6>m)m=$6} END{print m+0}' "$TMP_METRICS"
         echo -n "Maximum simultaneous LTI receiver processes: "
         awk -F, '{if($7>m)m=$7} END{print m+0}' "$TMP_METRICS"
-        echo -n "Minimum observed main fcgiwrap process count: "
-        awk -F, 'NR==1{m=$8} $8<m{m=$8} END{print m+0}' "$TMP_METRICS"
-        echo -n "Minimum observed receiver fcgiwrap process count: "
-        awk -F, 'NR==1{m=$9} $9<m{m=$9} END{print m+0}' "$TMP_METRICS"
+        echo -n "fcgiwrap main pool, most processes seen (workers + 1 master): "
+        awk -F, '{if($8>m)m=$8} END{print m+0}' "$TMP_METRICS"
+        echo -n "fcgiwrap main pool, samples with no process (not started yet): "
+        awk -F, '$8==0{c++} END{print c+0 " of " NR}' "$TMP_METRICS"
+        echo -n "fcgiwrap receiver pool, most processes seen (workers + 1 master): "
+        awk -F, '{if($9>m)m=$9} END{print m+0}' "$TMP_METRICS"
+        echo -n "fcgiwrap receiver pool, samples with no process (not started yet): "
+        awk -F, '$9==0{c++} END{print c+0 " of " NR}' "$TMP_METRICS"
+        echo "(fcgiwrap is socket-activated: after a reboot a pool only starts with its first request.)"
         echo
 
         echo "---------------- SOCKET QUEUES ----------------"
@@ -148,6 +154,11 @@ done
     echo "---------------- LTI USAGE ----------------"
     "$STATS_BIN" --start "$START" --end "$END" --logs "$NGINX_LOG_DIR/access.log*" 2>&1 \
         || echo "Could not calculate LTI usage statistics."
+
+    echo
+    echo "---------------- AI PROVIDER ----------------"
+    "$AI_EVENTS_BIN" report --start "$START" --end "$END" --logs "$NGINX_LOG_DIR/error.log*" 2>&1 \
+        || echo "Could not calculate AI event statistics."
 
     echo
     echo "Raw metrics: $LOG_DIR/metrics-YYYY-MM.csv (one file per month)"

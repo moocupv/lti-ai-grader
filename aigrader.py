@@ -23,6 +23,44 @@ def log_debug(message, config):
     if config.get("DEBUG"):
         sys.stderr.write(f"[DEBUG] {message}\n")
 
+def _clean_for_log(text):
+    """Single line, no secrets (API keys in URLs, bearer tokens)."""
+    text = re.sub(r"(?i)\b(key|api_key|token|access_token)=[^&\s\"']+", r"\1=***", str(text))
+    text = re.sub(r"(?i)bearer\s+\S+", "Bearer ***", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+def log_event(event, **fields):
+    """Write ONE line per notable event to stderr, for the monitoring scripts.
+
+    The web server keeps CGI stderr in its error log, so no extra file or permission is needed.
+    Format:  [lti-ai-grader] event=ai_error ts=... script=... key=value ...
+    Values are percent-encoded (no spaces or quotes) so a line is easy to parse.
+    It never includes the student's text, and it must never break the grader.
+    """
+    try:
+        parts = ["[lti-ai-grader]", f"event={event}",
+                 "ts=" + time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                 "script=" + os.path.basename(sys.argv[0])]
+        for key, value in fields.items():
+            if value is None or value == "":
+                continue
+            parts.append(f"{key}=" + urllib.parse.quote(_clean_for_log(value)[:300], safe="._-:/,"))
+        sys.stderr.write(" ".join(parts) + "\n")
+        sys.stderr.flush()
+    except Exception:
+        pass
+
+def _provider_error_message(body):
+    """Pull the human-readable message out of an API error body (JSON), else the raw text."""
+    try:
+        data = json.loads(body)
+        err = data.get("error", data) if isinstance(data, dict) else data
+        if isinstance(err, dict):
+            return err.get("message") or json.dumps(err)
+        return str(err)
+    except Exception:
+        return body
+
 def is_safe_url(url, allowed_domains_str):
     try:
         if not url:
@@ -115,6 +153,7 @@ def send_grade_to_lti(outcome_url, result_sourcedid, consumer_key, score_normali
 
 def call_ai_api(student_input, config):
     provider = config.get("provider", "openai").lower()
+    started = time.monotonic()
     try:
         if provider == "openai":
             url = config.get("api_url", "https://api.openai.com").rstrip('/')
@@ -142,8 +181,19 @@ def call_ai_api(student_input, config):
                 feedback = res['choices'][0]['message']['content']
             else:
                 feedback = res['candidates'][0]['content']['parts'][0]['text']
+            log_event("ai_ok", provider=provider, model=config.get("model_name"),
+                      ms=int((time.monotonic() - started) * 1000))
             return {'success': True, 'feedback': feedback}
     except Exception as e:
+        detail = ""
+        if isinstance(e, urllib.error.HTTPError):
+            try:
+                detail = _provider_error_message(e.read().decode("utf-8", "replace"))
+            except Exception:
+                detail = ""
+        log_event("ai_error", provider=provider, model=config.get("model_name"),
+                  kind=type(e).__name__, code=getattr(e, "code", None),
+                  ms=int((time.monotonic() - started) * 1000), detail=detail or str(e))
         return {'success': False, 'error': str(e)}
 
 def run(config):
@@ -190,6 +240,8 @@ def run(config):
             feedback = result['feedback']
             score, maximum = extract_flexible_grade(feedback, config['grade_identifier'])
             grade_sent = False
+            if score is None:
+                log_event("no_grade", model=config.get("model_name"))
 
             if session_token and score is not None:
                 token_file = f"{session_token}.json"
@@ -206,6 +258,10 @@ def run(config):
                             score / maximum if maximum > 0 else 0,
                             config
                         )
+                        if not grade_sent:
+                            log_event("lms_grade_failed")
+                else:
+                    log_event("session_missing")
 
             sys.stdout.write(json.dumps({
                 'success': True,
@@ -217,6 +273,7 @@ def run(config):
             sys.stdout.write(json.dumps({'success': False, 'error': result.get('error')}))
 
     except Exception as e:
+        log_event("cgi_error", kind=type(e).__name__, detail=str(e))
         sys.stdout.write(json.dumps({'success': False, 'error': str(e)}))
 
     sys.stdout.flush()

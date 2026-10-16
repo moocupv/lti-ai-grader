@@ -100,6 +100,7 @@ for timer in \
     lti-health-sample.timer \
     lti-health-daily.timer \
     lti-health-weekly.timer \
+    lti-health-ai-watch.timer \
     lti-health-watchdog.timer
 do
     if [ -f "$SYSTEMD_DST/$timer" ]; then
