@@ -23,7 +23,10 @@ check_active lti-health-sample.timer
 check_active lti-health-daily.timer
 check_active lti-health-weekly.timer
 check_active lti-health-watchdog.timer
-check_active fcgiwrap.service
+# fcgiwrap is socket-activated: the *service* only runs after the first request following a
+# boot or restart, so "fcgiwrap.service inactive" is normal while idle. What must always be up
+# is the listening *socket* (nginx connects to it, and systemd starts the service on demand).
+check_active fcgiwrap.socket
 check_active fcgiwrap-receiver.socket
 
 METRICS="$LOG_DIR/metrics-$(date '+%Y-%m').csv"
