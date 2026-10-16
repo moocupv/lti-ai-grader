@@ -436,6 +436,17 @@ SMTP_TIMEOUT=20
 
 Do not commit `/etc/lti-health/mail.env` or real credentials to Git. The mail sender uses only Python's standard library (`smtplib`), so no additional Python package is required.
 
+The shipped `mail.env.example` leaves `MAIL_TO`, `MAIL_FROM` and `SMTP_HOST` empty: while any of them is empty **nothing is sent** (the reports are still written to `/var/log/lti-health`), so installing the monitoring never produces mail errors. The weekly service ends with an error (visible in `systemctl status`) if mail is configured but the message cannot be sent.
+
+The weekly report covers the previous full ISO week (Monday to Sunday) and is run by `lti-health-weekly.timer` every Monday at 08:00. You can also generate it by hand, including for an older period:
+
+```bash
+sudo /usr/local/sbin/lti-health-weekly.sh                        # previous full week
+sudo /usr/local/sbin/lti-health-weekly.sh 2026-09-28 2026-10-04  # explicit range
+```
+
+Evaluator scripts are recognised by the name prefix `evalua`, so both `evaluate-*.py` and `evalua-*.py` are counted in the reports, in the concurrency samples and in the usage table.
+
 After configuring mail, test the complete weekly report without waiting for Monday:
 
 ```bash
