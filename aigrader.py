@@ -94,6 +94,20 @@ def extract_flexible_grade(text, grade_identifier):
         pass
     return None, None
 
+def _outcome_url_problem(url):
+    """Why was the outcome URL rejected? -> (reason, domain). Never raises."""
+    try:
+        if not url:
+            return "no_outcome_url", None
+        parsed = urlparse(url)
+        if not parsed.hostname:
+            return "url_without_domain", None      # relative URL, typical of launches from Studio
+        if parsed.scheme != "https":
+            return "url_not_https", parsed.hostname
+        return "domain_not_allowed", parsed.hostname
+    except Exception:
+        return "url_invalid", None
+
 def send_grade_to_lti(outcome_url, result_sourcedid, consumer_key, score_normalized, config):
     try:
         log_debug(f"Iniciando envio de nota LTI a: {outcome_url}", config)
@@ -101,11 +115,14 @@ def send_grade_to_lti(outcome_url, result_sourcedid, consumer_key, score_normali
         is_safe, final_url = is_safe_url(outcome_url, config.get("LTI_ALLOWED_DOMAINS", ""))
         if not is_safe:
             log_debug(f"URL rechazada por is_safe_url. Permitidos: {config.get('LTI_ALLOWED_DOMAINS')}", config)
+            reason, domain = _outcome_url_problem(outcome_url)
+            log_event("lms_grade_failed", reason=reason, domain=domain)
             return False
 
         secret = config.get("lti_consumer_secrets", {}).get(consumer_key)
         if not secret:
             log_debug(f"No hay secret configurado para consumer_key: '{consumer_key}'", config)
+            log_event("lms_grade_failed", reason="no_secret", consumer_key=consumer_key)
             return False
 
         xml_body = f"""<?xml version="1.0" encoding="UTF-8"?>
@@ -144,14 +161,23 @@ def send_grade_to_lti(outcome_url, result_sourcedid, consumer_key, score_normali
             res_code = response.getcode()
             res_body = response.read().decode('utf-8', errors='ignore')
             log_debug(f"Respuesta de Open edX -> Code: {res_code}, Body: {res_body}", config)
+            if res_code != 200:
+                log_event("lms_grade_failed", reason="unexpected_status", code=res_code)
+            elif re.search(r"<imsx_codeMajor>\s*failure", res_body, re.IGNORECASE):
+                # LTI Basic Outcomes: HTTP 200 can still carry "failure". The return value is unchanged.
+                description = re.search(r"<imsx_description>(.*?)</imsx_description>", res_body, re.IGNORECASE | re.DOTALL)
+                log_event("lms_grade_failed", reason="lms_reported_failure",
+                          detail=description.group(1) if description else "")
             return res_code == 200
 
     except urllib.error.HTTPError as e:
         err_body = e.read().decode('utf-8', errors='ignore') if e.fp else ""
         log_debug(f"HTTPError al conectar con Open edX -> {e.code} {e.reason}: {err_body}", config)
+        log_event("lms_grade_failed", reason="http_error", code=e.code, detail=err_body)
         return False
     except Exception as e:
         log_debug(f"Excepcion en send_grade_to_lti -> {type(e).__name__}: {str(e)}", config)
+        log_event("lms_grade_failed", reason="exception", kind=type(e).__name__, detail=str(e))
         return False
 
 def call_ai_api(student_input, config):
@@ -262,8 +288,6 @@ def run(config):
                             score/maximum if maximum > 0 else 0,
                             config
                         )
-                        if not grade_sent:
-                            log_event("lms_grade_failed")
                 else:
                     log_event("session_missing")
 

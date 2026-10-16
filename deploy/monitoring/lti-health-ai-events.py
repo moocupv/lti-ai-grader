@@ -38,6 +38,19 @@ MARK = "[lti-ai-grader]"
 TOKEN_RE = re.compile(r"^(\w+)=(.*)$")
 DEFAULT_ERROR_LOGS = "/var/log/nginx/error.log*"
 
+LMS_FAILURE_MEANING = {
+    "url_without_domain": "outcome URL has no domain (typical of launches from Studio, which has no gradebook)",
+    "no_outcome_url": "the LTI launch carried no outcome URL (component not scored?)",
+    "url_not_https": "outcome URL is not https",
+    "domain_not_allowed": "domain not in LTI_ALLOWED_DOMAINS",
+    "url_invalid": "outcome URL could not be parsed",
+    "no_secret": "no secret configured for this consumer key",
+    "http_error": "the LMS answered with an HTTP error",
+    "unexpected_status": "the LMS answered with a status other than 200",
+    "lms_reported_failure": "the LMS answered 200 but reported failure",
+    "exception": "network or other error talking to the LMS",
+}
+
 
 # --------------------------------------------------------------------------- parsing
 def open_text(path):
@@ -142,6 +155,25 @@ def cmd_report(args):
             f"p95 {percentile(latencies, 95) / 1000:.1f} s, max {latencies[-1] / 1000:.1f} s, "
             f"over 60 s: {slow}"
         )
+
+    lms_failures = Counter()
+    for e in events:
+        if e["event"] == "lms_grade_failed":
+            reason = e.get("reason", "unknown (logged before reasons existed)")
+            if e.get("domain"):
+                reason += f" [{e['domain']}]"
+            elif e.get("consumer_key"):
+                reason += f" [{e['consumer_key']}]"
+            elif e.get("code"):
+                reason += f" [{e['code']}]"
+            lms_failures[reason] += 1
+    if lms_failures:
+        print()
+        print("GRADES NOT DELIVERED TO THE LMS, BY REASON")
+        print("------------------------------------------")
+        for reason, n in lms_failures.most_common():
+            meaning = LMS_FAILURE_MEANING.get(reason.split(" [", 1)[0], "")
+            print(f"{n:6d}  {reason}" + (f"  - {meaning}" if meaning else ""))
 
     causes = {}
     for e in events:

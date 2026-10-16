@@ -485,11 +485,11 @@ The evaluator CGI scripts always answer HTTP 200, even when the AI provider fail
 | `ai_ok` | The provider answered (with the response time in `ms`) |
 | `ai_error` | The call failed: HTTP error (with the provider's own message), timeout, no connection, malformed answer |
 | `no_grade` | The model answered but without the grade line (nothing is sent to the LMS) |
-| `lms_grade_failed` | The grade could not be delivered to the LMS |
+| `lms_grade_failed` | The grade could not be delivered to the LMS. The event carries a `reason`: `url_without_domain` (relative outcome URL, typical of launches from Studio), `no_outcome_url`, `url_not_https`, `domain_not_allowed` (with the domain), `no_secret` (with the consumer key), `http_error` (with the code and the LMS message), `unexpected_status`, `lms_reported_failure` (HTTP 200 but the LMS reports failure) or `exception` |
 | `session_missing` | A session token was sent but its session file does not exist |
 | `cgi_error` | Unexpected error in the grader |
 
-Events never contain the student's text, and API keys or bearer tokens that appear in an error message are masked. The daily and weekly reports get an **AI PROVIDER** section: calls, errors and error rate, errors grouped by cause, a table by evaluator script, response times (median, p95, maximum) and, in the weekly report, a day-by-day table.
+Events never contain the student's text, and API keys or bearer tokens that appear in an error message are masked. The daily and weekly reports get an **AI PROVIDER** section: calls, errors and error rate, grades not delivered to the LMS grouped by reason, errors grouped by cause, a table by evaluator script, response times (median, p95, maximum) and, in the weekly report, a day-by-day table.
 
 `lti-health-ai-watch.timer` runs `lti-health-ai-events.py watch` every 5 minutes. When the last **3** AI calls in a row failed (all within the last **30** minutes) it sends **one** e-mail with the most recent error, the evaluators affected and the last successful call, and it sends **one more** when a call succeeds again. Failures mixed with successful calls do not trigger it, and it does not repeat while the outage continues. If the e-mail cannot be sent, the service ends with an error and tries again on the next run. Without SMTP configured nothing is sent, and the message is only saved in `/var/log/lti-health/ai-alert.txt`. The thresholds can be changed in `/etc/lti-health/mail.env`:
 
