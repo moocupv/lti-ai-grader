@@ -530,3 +530,14 @@ To achieve this:
 3.  The repository includes a specific HTML file example demonstrating how to implement this script.
 
 This method enables high scalability, as a single deployment of the evaluator can handle a diverse range of specific writing tasks across an entire course.
+
+## 12. Tests
+
+`tests/test_lti_oauth_signature.py` checks that the OAuth 1.0 signature of the LTI grade passback verifies exactly as Open edX verifies it (same body-hash and HMAC-SHA1 checks as `xblock-lti-consumer`), including secrets and consumer keys with special characters and body hashes that contain `/`:
+
+```bash
+pip install oauthlib
+python3 -m unittest discover -s tests -v
+```
+
+It guards against a bug that made about one grade in three fail: the OAuth parameters were percent-encoded with `urllib.parse.quote()`, which leaves `/` unencoded, so whenever the base64 `oauth_body_hash` contained a `/` Open edX computed a different signature and answered HTTP 500 (`OAuth signature verification has failed`). The grade never reached the gradebook, and the evaluator still showed the correction to the student. In the `lms_grade_failed` events this appears as `reason=http_error code=500`.

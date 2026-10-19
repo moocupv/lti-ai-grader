@@ -94,6 +94,12 @@ def extract_flexible_grade(text, grade_identifier):
         pass
     return None, None
 
+def _oauth_escape(value):
+    """Percent-encoding de OAuth 1.0 (RFC 5849, apartado 3.6): solo A-Z a-z 0-9 - . _ ~ quedan sin codificar.
+    urllib.parse.quote() por defecto deja sin codificar la '/' (safe='/'); un oauth_body_hash en base64
+    que la contenga (34 % de las veces) producia una firma distinta de la que calcula Open edX."""
+    return urllib.parse.quote(str(value), safe="")
+
 def _outcome_url_problem(url):
     """Why was the outcome URL rejected? -> (reason, domain). Never raises."""
     try:
@@ -143,13 +149,13 @@ def send_grade_to_lti(outcome_url, result_sourcedid, consumer_key, score_normali
             'oauth_timestamp': str(int(time.time())),
             'oauth_version': '1.0',
         }
-        encoded_url = urllib.parse.quote(final_url, safe='')
-        sorted_params = '&'.join([f"{urllib.parse.quote(k)}={urllib.parse.quote(v)}" for k, v in sorted(oauth_params.items())])
-        base_string = f"POST&{encoded_url}&{urllib.parse.quote(sorted_params)}"
-        signing_key = f"{urllib.parse.quote(secret)}&".encode('utf-8')
+        encoded_url = _oauth_escape(final_url)
+        sorted_params = '&'.join([f"{_oauth_escape(k)}={_oauth_escape(v)}" for k, v in sorted(oauth_params.items())])
+        base_string = f"POST&{encoded_url}&{_oauth_escape(sorted_params)}"
+        signing_key = f"{_oauth_escape(secret)}&".encode('utf-8')
         signature = base64.b64encode(hmac.new(signing_key, base_string.encode('utf-8'), hashlib.sha1).digest()).decode('utf-8')
         oauth_params['oauth_signature'] = signature
-        auth_header = 'OAuth ' + ', '.join([f'{k}="{urllib.parse.quote(v)}"' for k, v in oauth_params.items()])
+        auth_header = 'OAuth ' + ', '.join([f'{k}="{_oauth_escape(v)}"' for k, v in oauth_params.items()])
 
         req = urllib.request.Request(
             final_url,
