@@ -44,6 +44,7 @@ It is **opt-in** (`saveToLms: false` by default) and needs **no change on the Py
 | `jschannel.js` | web root, next to `jsinput_store.html` | Mozilla jschannel (**not included**, see below) |
 | `openedx/problem-store-corrections.xml` | Studio, problem **advanced editor** | The jsinput problem |
 | `openedx/expandir_respuestas.py` | instructor's computer | Expands the downloaded report into one row per attempt |
+| `openedx/excel/ResumenOpenEdX.bas` | instructor's computer (Excel for Windows) | VBA macro: one row per student from the downloaded report, see "Excel summary" |
 | `openedx/test-puente-lms.html` | web root, **temporarily** | Test page that simulates a correction (no LLM needed) |
 
 > `openedx/` is deliberately not copied by `deploy_to_server.sh` (it only copies `*.html`,
@@ -177,7 +178,55 @@ string and a bare `%` made the submission fail with `URIError: URI malformed`.
    `--columna "<name>"`) and keeps the other columns. It was tested with the `student_answers`
    format described above; check it against a real report from your instance.
 
+The script also reads the *student state* report (`student_state_from_block-….csv`); on a real report
+it returned one row per correction. That report carries a huge `state` column (hundreds of KB per
+student) that is copied as is, so the output can be very large: delete that column if you do not need it.
+
 Open edX also keeps a snapshot of every submission in the student's state history.
+
+### Excel summary: one row per student (Windows)
+
+`openedx/excel/ResumenOpenEdX.bas` is a VBA module that reads the *student state* CSV
+(`student_state_from_block-….csv`) and builds a sheet **"Resumen por alumno"** with one row per
+student:
+
+| Column | Content |
+| :--- | :--- |
+| Identificación | Open edX username |
+| Enunciado | Task statement of the last submission |
+| Nº de envíos | Number of corrections stored (it can be 1 less than Open edX's `attempts`, which also counts clicks on Submit without a correction) |
+| Última nota | Grade of the last correction as the AI returned it (e.g. `12/15`), stored as text so Excel does not turn it into a date |
+| Última respuesta | The student's text in the last submission |
+| Última corrección de la IA | The AI feedback for that submission |
+
+"Last" is the submission with the most recent `fecha`, not the one listed last. If a student appears
+twice, the record with the most recent submission is kept. Records that cannot be read (no answer
+stored, no submissions, damaged JSON) are listed in an **"Incidencias"** sheet with the reason and, for
+errors, the failing step and position. Both sheets are replaced on every run.
+
+**Why a macro and not just opening the CSV in Excel:** the `Respuesta` cell holds the student's whole
+history as JSON and can exceed 32,767 characters, the limit of an Excel cell, so Excel would silently
+truncate it. The macro reads the file itself (UTF-8, quoted fields with embedded line breaks) and never
+builds the huge `state` column.
+
+**Install** (once): create a new workbook, press `Alt+F11`, *File → Import File…*, choose
+`ResumenOpenEdX.bas`, and save the workbook as *Excel Macro-Enabled Workbook (.xlsm)*.
+**Use:** `Alt+F8` → `ImportarInformeOpenEdX` (or assign it to a button) → pick the CSV.
+
+Notes:
+
+* Requires **Excel for Windows** (it reads the file with `ADODB.Stream`). Everything runs locally.
+* The `.xlsm` is intentionally not committed: a binary cannot be reviewed in a diff. The `.bas` is the
+  source. It must stay in Windows-1252 with CRLF line endings; `.gitattributes` keeps Git from converting it.
+* A student text that starts with `=`, `+`, `-` or `@` is prefixed with a space so Excel never treats
+  it as a formula. Texts longer than 32,000 characters are truncated with a visible note.
+* Processing time grows with the size of the report: 83 s for a synthetic 190 MB report (120 students) in the
+  LibreOffice Basic test environment, about 0.45 s per MB. Excel's own speed may differ.
+* **Testing.** The parsing core was run in an independent Basic interpreter (LibreOffice) and compared
+  character by character with a separate Python implementation on eight files: a real report and
+  synthetic ones with emojis, odd JSON escapes, CR/LF/CRLF endings, BOM, 40 columns, 150 students and
+  41 submissions in one student. The Excel layer (file dialog, sheets, formatting) has been run in
+  Excel on one real report with a single student; it has not been exercised with many students.
 
 ## Troubleshooting
 

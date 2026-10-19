@@ -255,7 +255,7 @@ CONFIG = {
 
 ### 6.1 Optional: store the student's answer and the AI correction in the LMS
 
-With `saveToLms: true` in the corrector's HTML, every AI correction (student answer + feedback + grade) is sent back to the Open edX page and saved, accumulating all attempts, in the student's state of a *Custom JavaScript Display and Grading* problem. Instructors can then download it from the Instructor Dashboard. It is disabled by default and needs no change on the Python side.
+With `saveToLms: true` in the corrector's HTML, every AI correction (student answer + feedback + grade) is sent back to the Open edX page and saved, accumulating all attempts, in the student's state of a *Custom JavaScript Display and Grading* problem. Instructors can then download it from the Instructor Dashboard, and an optional Excel macro (`openedx/excel/ResumenOpenEdX.bas`) turns the report into one row per student. It is disabled by default and needs no change on the Python side.
 
 See [`openedx/README.md`](openedx/README.md) for the architecture, setup, configuration and troubleshooting.
 
