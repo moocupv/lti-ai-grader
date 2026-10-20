@@ -241,8 +241,9 @@ Notes:
 * Requires **Excel for Windows** (it reads the file with `ADODB.Stream`). Everything runs locally.
 * The `.xlsm` is intentionally not committed to the tree: a binary cannot be reviewed in a diff and every
   version would stay in the history for good. It is published as an asset of a GitHub Release instead.
-  The `.bas` is the source. The VBA editor imports it as Windows-1252 text with **CRLF** line endings, so `.gitattributes`
-  makes Git store it with LF (clean diffs) and always check it out with CRLF, on every platform.
+  The `.bas` is the source. The VBA editor imports it as Windows-1252 text with **CRLF** line endings, so
+  `.gitattributes` marks it `-text`: Git stores and serves the file byte for byte, with CRLF, however it is
+  downloaded (clone, ZIP or the Raw button). Do not re-save it with an editor that converts line endings.
 * A student text that starts with `=`, `+`, `-` or `@` is prefixed with a space so Excel never treats
   it as a formula. Texts longer than 32,000 characters are truncated with a visible note.
 * **Speed** depends mostly on the size of the stored answers, not on the size of the CSV. In the
