@@ -18,7 +18,9 @@ Attribute VB_Name = "ResumenOpenEdX"
 Option Explicit
 
 '==============================================================================
-' NUCLEO: lectura del CSV de Open edX y decodificacion del JSON.
+' NUCLEO: lectura del CSV de Open edX (de un problema o de una seccion) y decodificacion del JSON.
+' Una fila por cada linea de correcciones (alumno y problema), con el nombre del problema al principio y la
+' puntuacion de la linea LTI de ese mismo alumno y problema al final. El resto de lineas se ignora.
 ' No usa objetos de Excel ni COM: solo cadenas, matrices y Collection.
 ' Los almacenes de trabajo (m_...) son variables de modulo a proposito: las
 ' matrices no se pasan como parametros, asi el codigo se comporta igual en
@@ -31,6 +33,7 @@ Option Explicit
 Private Const MAX_CELDA As Long = 32000      ' Excel admite 32767 caracteres por celda
 Private Const HOJA_RESUMEN As String = "Resumen por alumno"
 Private Const HOJA_INCIDENCIAS As String = "Incidencias"
+Private Const LIMITE_CAMPO_PEQUENO As Long = 4000   ' el estado de un LTI es diminuto; el de un problema, enorme
 
 Private Type TIntento
     Fecha As String
@@ -41,6 +44,7 @@ Private Type TIntento
 End Type
 
 Private Type TResumen
+    Problema As String
     Usuario As String
     Enunciado As String
     Envios As Long
@@ -48,6 +52,8 @@ Private Type TResumen
     Respuesta As String
     Correccion As String
     Fecha As String
+    Lti As Double
+    TieneLti As Boolean
 End Type
 
 ' --- analizador JSON ---
@@ -70,6 +76,11 @@ Private m_nInc As Long
 Private m_motivo As String           ' motivo de la incidencia del registro actual
 Private m_donde As String            ' ultimo paso en curso (para los mensajes de error)
 Private m_detalle As String          ' columnas encontradas (para los mensajes de error)
+Private m_lti As Collection          ' puntuacion LTI por clave "alumno|problema"
+Private m_nPrev As Long              ' campos del registro anterior (para borrar los restos)
+Private m_nSinEnvios As Long         ' lineas de correcciones sin ningun envio
+Private m_nIgnoradas As Long         ' lineas que no son ni LTI ni correcciones
+Private m_nSinLti As Long            ' filas sin puntuacion LTI
 
 ' --- constructor de cadenas (se usa de uno en uno, nunca anidado) ---
 Private m_pb() As String
@@ -118,6 +129,7 @@ End Sub
 
 ' Copia campo a campo (equivale a  m_res(idx) = m_r  y a  m_int(idx) = m_it)
 Private Sub GuardarResumen(ByVal idx As Long)
+    m_res(idx).Problema = m_r.Problema
     m_res(idx).Usuario = m_r.Usuario
     m_res(idx).Enunciado = m_r.Enunciado
     m_res(idx).Envios = m_r.Envios
@@ -125,6 +137,8 @@ Private Sub GuardarResumen(ByVal idx As Long)
     m_res(idx).Respuesta = m_r.Respuesta
     m_res(idx).Correccion = m_r.Correccion
     m_res(idx).Fecha = m_r.Fecha
+    m_res(idx).Lti = m_r.Lti
+    m_res(idx).TieneLti = m_r.TieneLti
 End Sub
 
 Private Sub GuardarIntento(ByVal idx As Long)
@@ -159,8 +173,9 @@ End Function
 ' Rellena m_campos y devuelve el numero de campos, o 0 si no queda texto.
 '------------------------------------------------------------------------------
 Private Function LeerRegistroCsv(ByRef t As String, ByRef pos As Long, _
-        ByVal c1 As Long, ByVal c2 As Long, ByVal todos As Boolean) As Long
-    Dim lon As Long, n As Long, quiere As Boolean
+        ByVal c1 As Long, ByVal c2 As Long, ByVal c3 As Long, ByVal c4 As Long, ByVal cPeq As Long, _
+        ByVal todos As Boolean) As Long
+    Dim lon As Long, n As Long, quiere As Boolean, chica As Boolean, total As Long, k As Long
     Dim q As Long, a As Long, ch As String, valor As String
 
     lon = Len(t)
@@ -172,24 +187,33 @@ Private Function LeerRegistroCsv(ByRef t As String, ByRef pos As Long, _
     Do
         quiere = False
         If todos Then quiere = True
-        If n = c1 Or n = c2 Then quiere = True
+        If n = c1 Or n = c2 Or n = c3 Or n = c4 Then quiere = True
+        chica = False
+        If n = cPeq And Not quiere Then chica = True       ' solo se guarda si mide menos de LIMITE_CAMPO_PEQUENO
         valor = ""
         If Mid$(t, pos, 1) = """" Then
             pos = pos + 1
-            If quiere Then PbIniciar
+            total = 0
+            If quiere Or chica Then PbIniciar
             Do
                 q = InStr(pos, t, """")
                 If q = 0 Then Err.Raise 1100, , "Campo entrecomillado sin cerrar en el CSV"
-                If quiere And q > pos Then PbAgregar Mid$(t, pos, q - pos)
+                If chica Then
+                    total = total + (q - pos)
+                    If total > LIMITE_CAMPO_PEQUENO Then chica = False      ' demasiado grande: se deja de construir
+                End If
+                If quiere Or chica Then
+                    If q > pos Then PbAgregar Mid$(t, pos, q - pos)
+                End If
                 If Mid$(t, q + 1, 1) = """" Then
-                    If quiere Then PbAgregar """"
+                    If quiere Or chica Then PbAgregar """"
                     pos = q + 2
                 Else
                     pos = q + 1
                     Exit Do
                 End If
             Loop
-            If quiere Then valor = PbUnir()
+            If quiere Or chica Then valor = PbUnir()
         Else
             a = pos
             Do While a <= lon
@@ -197,7 +221,7 @@ Private Function LeerRegistroCsv(ByRef t As String, ByRef pos As Long, _
                 If ch = "," Or ch = vbCr Or ch = vbLf Then Exit Do
                 a = a + 1
             Loop
-            If quiere Then valor = Mid$(t, pos, a - pos)
+            If quiere Or (chica And a - pos <= LIMITE_CAMPO_PEQUENO) Then valor = Mid$(t, pos, a - pos)
             pos = a
         End If
 
@@ -220,6 +244,10 @@ Private Function LeerRegistroCsv(ByRef t As String, ByRef pos As Long, _
             Err.Raise 1101, , "CSV mal formado: se esperaba una coma o un fin de línea"
         End If
     Loop
+    For k = n To m_nPrev - 1                               ' un registro mas corto no hereda campos del anterior
+        m_campos(k) = ""
+    Next k
+    m_nPrev = n
     LeerRegistroCsv = n
 End Function
 
@@ -558,6 +586,84 @@ Private Function TextoParaCelda(ByVal s As String) As String
     TextoParaCelda = s
 End Function
 
+' Valor numerico de la clave de primer nivel indicada (p. ej. "module_score"). No lo es: encontrado = False.
+Private Function JsonObtenerNumero(ByVal json As String, ByVal clave As String, ByRef encontrado As Boolean) As Double
+    Dim k As String, c As String, ini As Long
+    m_donde = "JsonObtenerNumero"
+    encontrado = False
+    JsIniciarObjeto json
+    Do While JsSiguienteClave(k)
+        If k = clave Then
+            c = Mid$(m_t, m_p, 1)
+            If (c >= "0" And c <= "9") Or c = "-" Or c = "." Then
+                ini = m_p
+                Do While m_p <= m_n
+                    c = Mid$(m_t, m_p, 1)
+                    If InStr(1, "0123456789+-.eE", c) = 0 Then Exit Do
+                    m_p = m_p + 1
+                Loop
+                JsonObtenerNumero = Val(Mid$(m_t, ini, m_p - ini))
+                encontrado = True
+                Exit Function
+            End If
+        End If
+        JsSaltarValor
+    Loop
+End Function
+
+' Puntuacion (module_score) del estado de un componente LTI. Si no hay o no se entiende: hay = False.
+Private Function LeerPuntuacionLti(ByVal estado As String, ByRef hay As Boolean) As Double
+    On Error GoTo Falla
+    hay = False
+    If Len(Trim$(estado)) = 0 Then Exit Function
+    LeerPuntuacionLti = JsonObtenerNumero(estado, "module_score", hay)
+    Exit Function
+Falla:
+    hay = False
+End Function
+
+' Nombre del problema a partir de "location": la ruta sin el curso (primer tramo) ni el componente (ultimo tramo).
+' "Curso > Unidad > Seccion > Ejercicio 1 > Corrections record"  ->  "Unidad > Seccion > Ejercicio 1"
+Private Function NombreProblema(ByVal ubic As String) As String
+    Dim seg() As String, n As Long, i As Long, r As String
+    If Len(ubic) = 0 Then Exit Function
+    seg = Split(ubic, " > ")
+    n = UBound(seg) + 1
+    If n >= 3 Then
+        For i = 1 To n - 2
+            If i > 1 Then r = r & " > "
+            r = r & seg(i)
+        Next i
+        NombreProblema = r
+    ElseIf n = 2 Then
+        NombreProblema = seg(0)
+    Else
+        NombreProblema = ubic
+    End If
+End Function
+
+' Una linea de correcciones lleva el historial JSON del almacen: empieza por { y contiene "intentos"
+Private Function EsLineaDeCorrecciones(ByVal json As String) As Boolean
+    json = Trim$(json)
+    EsLineaDeCorrecciones = (Left$(json, 1) = "{") And (InStr(1, json, "intentos") > 0)
+End Function
+
+' Componente LTI: block_key con "type@lti" (lti_consumer o lti); sin block_key, un titulo que contenga "lti"
+Private Function EsLti(ByVal valor As String, ByVal esBlockKey As Boolean) As Boolean
+    If esBlockKey Then
+        EsLti = (InStr(1, LCase$(valor), "type@lti") > 0)
+    Else
+        EsLti = (InStr(1, LCase$(valor), "lti") > 0)
+    End If
+End Function
+
+Private Sub LtiGuardar(ByVal clave As String, ByVal valor As Double)
+    On Error Resume Next
+    m_lti.Remove clave                           ' si ya habia una, gana la ultima
+    On Error GoTo 0
+    m_lti.Add valor, clave
+End Sub
+
 '------------------------------------------------------------------------------
 ' Procesa un registro del CSV y devuelve el resumen del alumno (en r).
 ' Devuelve False si no se pudo interpretar. m_motivo describe cualquier incidencia.
@@ -573,6 +679,9 @@ Private Function ProcesarRegistro(ByVal usuario As String, ByVal json As String)
     m_r.Respuesta = ""
     m_r.Correccion = ""
     m_r.Fecha = ""
+    m_r.Problema = ""
+    m_r.Lti = 0
+    m_r.TieneLti = False
     m_motivo = ""
 
     If Len(Trim$(json)) = 0 Then
@@ -593,8 +702,7 @@ Private Function ProcesarRegistro(ByVal usuario As String, ByVal json As String)
         Exit Function
     End If
     m_r.Envios = n
-    If n = 0 Then
-        m_motivo = "El alumno no tiene ningún envío registrado"
+    If n = 0 Then                                ' lista vacia: no es una correccion, no es una incidencia
         ProcesarRegistro = True
         Exit Function
     End If
@@ -623,23 +731,32 @@ Falla:
 End Function
 
 '------------------------------------------------------------------------------
-' Recorre todo el CSV y deja los resultados en m_res / m_incid. Un resumen por
-' alumno (si un alumno aparece dos veces se conserva el registro con el envio
-' mas reciente). Devuelve el numero de alumnos.
+' Recorre todo el CSV (de un problema o de una seccion entera) y deja los resultados en m_res / m_incid.
+'   - lineas LTI: se guarda su puntuacion (module_score) por alumno y problema
+'   - lineas de correcciones: una fila por cada una (sin agrupar por alumno), con el nombre del problema
+'   - cualquier otra linea se ignora; solo es incidencia una linea de correcciones que no se puede leer
+' Al final, cada fila recibe la puntuacion de la linea LTI de su mismo alumno y problema.
+' Devuelve el numero de filas.
 '------------------------------------------------------------------------------
 Private Function ExtraerResumenes(ByRef t As String) As Long
-    Dim pos As Long, nCampos As Long, cUsr As Long, cJson As Long, fila As Long, i As Long
-    Dim ok As Boolean
-    Dim claves As New Collection, idx As Long, clave As String, usuario As String, json As String
+    Dim pos As Long, nCampos As Long, fila As Long, i As Long
+    Dim cUsr As Long, cJson As Long, cLoc As Long, cBk As Long, cTit As Long, cEst As Long, cTipo As Long
+    Dim ok As Boolean, usuario As String, json As String, prob As String, tipo As String
+    Dim valor As Double, hay As Boolean, clave As String
 
     If Left$(t, 1) = ChrW(&HFEFF) Then t = Mid$(t, 2)          ' marca BOM de UTF-8
     CamposIniciar
     ResIniciar
     IncIniciar
+    Set m_lti = New Collection
+    m_nPrev = 0
+    m_nSinEnvios = 0
+    m_nIgnoradas = 0
+    m_nSinLti = 0
     m_detalle = ""
     pos = 1
 
-    nCampos = LeerRegistroCsv(t, pos, -1, -1, True)
+    nCampos = LeerRegistroCsv(t, pos, -1, -1, -1, -1, -1, True)
     If nCampos = 0 Then Err.Raise 1200, , "El fichero está vacío"
     cUsr = BuscarColumna(nCampos, "username|user name|usuario|nombre de usuario|student|alumno|user")
     cJson = BuscarColumna(nCampos, "respuesta|answer|response")
@@ -650,39 +767,69 @@ Private Function ExtraerResumenes(ByRef t As String) As Long
         Next i
         Err.Raise 1201, , "No se reconocen las columnas del informe. Faltan 'username' y/o 'Respuesta' (o 'Answer')."
     End If
+    cLoc = BuscarColumna(nCampos, "location|ubicacion|ubicación")
+    cBk = BuscarColumna(nCampos, "block_key")
+    cTit = BuscarColumna(nCampos, "title|titulo|título")
+    cEst = BuscarColumna(nCampos, "state|estado")
+    cTipo = cBk                                                ' sin block_key, el tipo de bloque se deduce del titulo
+    If cBk < 0 Then cTipo = cTit
     fila = 1
 
     Do
-        nCampos = LeerRegistroCsv(t, pos, cUsr, cJson, False)
+        nCampos = LeerRegistroCsv(t, pos, cUsr, cJson, cLoc, cTipo, cEst, False)
         If nCampos = 0 Then Exit Do
         fila = fila + 1
         If fila Mod 5 = 0 Then Progreso fila
         If nCampos > 1 Or Len(m_campos(0)) > 0 Then
             usuario = Trim$(m_campos(cUsr))
             json = m_campos(cJson)
-            ok = ProcesarRegistro(usuario, json)
-            If Len(m_motivo) > 0 Then
-                If m_nInc > UBound(m_incid) Then IncCrecer
-                m_incid(m_nInc) = fila & "|" & usuario & "|" & m_motivo
-                m_nInc = m_nInc + 1
-            End If
-            If ok Or Len(usuario) > 0 Then
-                clave = "u:" & LCase$(usuario)
-                idx = -1
-                On Error Resume Next
-                idx = claves(clave)
-                On Error GoTo 0
-                If idx >= 0 Then
-                    If StrComp(m_r.Fecha, m_res(idx).Fecha, vbBinaryCompare) > 0 Then GuardarResumen idx
+            prob = ""
+            If cLoc >= 0 Then prob = NombreProblema(m_campos(cLoc))
+            tipo = ""
+            If cTipo >= 0 Then tipo = m_campos(cTipo)
+
+            If cTipo >= 0 And EsLti(tipo, cBk >= 0) Then
+                If cEst >= 0 Then
+                    valor = LeerPuntuacionLti(m_campos(cEst), hay)
+                    If hay Then LtiGuardar "u:" & LCase$(usuario) & "|" & prob, valor
+                End If
+            ElseIf EsLineaDeCorrecciones(json) Then
+                ok = ProcesarRegistro(usuario, json)
+                If Not ok Or Len(m_motivo) > 0 Then
+                    If m_nInc > UBound(m_incid) Then IncCrecer
+                    m_incid(m_nInc) = fila & "|" & usuario & "|" & m_motivo
+                    m_nInc = m_nInc + 1
+                ElseIf m_r.Envios = 0 Then
+                    m_nSinEnvios = m_nSinEnvios + 1
                 Else
+                    m_r.Problema = prob
                     If m_nRes > UBound(m_res) Then ResCrecer
                     GuardarResumen m_nRes
-                    claves.Add m_nRes, clave
                     m_nRes = m_nRes + 1
                 End If
+            Else
+                m_nIgnoradas = m_nIgnoradas + 1
             End If
         End If
     Loop
+
+    For i = 0 To m_nRes - 1                                    ' puntuacion de la linea LTI de cada fila
+        clave = "u:" & LCase$(m_res(i).Usuario) & "|" & m_res(i).Problema
+        hay = False
+        Err.Clear
+        On Error Resume Next
+        valor = m_lti.Item(clave)
+        hay = (Err.Number = 0)
+        On Error GoTo 0
+        If hay Then
+            m_res(i).Lti = valor
+            m_res(i).TieneLti = True
+        Else
+            m_res(i).Lti = 0
+            m_res(i).TieneLti = False
+            m_nSinLti = m_nSinLti + 1
+        End If
+    Next i
     ExtraerResumenes = m_nRes
 End Function
 
@@ -691,7 +838,7 @@ End Function
 ' escritura de las hojas de resultados.
 '==============================================================================
 
-' Macro principal: pide el CSV de Open edX y genera la hoja "Resumen por alumno"
+' Macro principal: pide el CSV de Open edX (de un problema o de una seccion) y genera la hoja "Resumen por alumno"
 Public Sub ImportarInformeOpenEdX()
     Dim ruta As Variant
 #If Mac Then
@@ -735,7 +882,10 @@ Private Sub ProcesarInforme(ByVal ruta As String)
     EscribirIncidencias
 
     RestaurarExcel
-    aviso = "Alumnos procesados: " & n & vbCrLf & "Tiempo: " & Format(Timer - inicio, "0.0") & " s"
+    aviso = "Filas de correcciones: " & n & vbCrLf & _
+            "Con puntuaci" & ChrW(243) & "n LTI: " & (n - m_nSinLti) & "   Sin ella: " & m_nSinLti & vbCrLf & _
+            "L" & ChrW(237) & "neas ignoradas (otros bloques o sin env" & ChrW(237) & "os): " & (m_nIgnoradas + m_nSinEnvios) & vbCrLf & _
+            "Tiempo: " & Format(Timer - inicio, "0.0") & " s"
     If m_nInc > 0 Then
         aviso = aviso & vbCrLf & vbCrLf & "Incidencias: " & m_nInc & " (consulta la hoja """ & HOJA_INCIDENCIAS & """)."
     End If
@@ -793,50 +943,58 @@ Private Sub EscribirResumen(ByVal n As Long)
     ws.Cells.Font.Name = "Arial"
     ws.Cells.Font.Size = 10
     ws.Cells.NumberFormat = "@"                               ' todo como texto: "12/15" no debe convertirse en fecha
-    ws.Range("C:C").NumberFormat = "0"                        ' salvo el numero de envios
+    ws.Range("D:D").NumberFormat = "0"                        ' salvo el numero de envios
+    ws.Range("H:H").NumberFormat = "0.0#"                     ' y la puntuacion del LTI
 
-    ws.Range("A1").Value = "Identificaci" & ChrW(243) & "n"
-    ws.Range("B1").Value = "Enunciado"
-    ws.Range("C1").Value = "N" & ChrW(186) & " de env" & ChrW(237) & "os"
-    ws.Range("D1").Value = ChrW(218) & "ltima nota"
-    ws.Range("E1").Value = ChrW(218) & "ltima respuesta"
-    ws.Range("F1").Value = ChrW(218) & "ltima correcci" & ChrW(243) & "n de la IA"
-    EstiloCabecera ws.Range("A1:F1")
+    ws.Range("A1").Value = "Problema"
+    ws.Range("B1").Value = "Identificaci" & ChrW(243) & "n"
+    ws.Range("C1").Value = "Enunciado"
+    ws.Range("D1").Value = "N" & ChrW(186) & " de env" & ChrW(237) & "os"
+    ws.Range("E1").Value = ChrW(218) & "ltima nota"
+    ws.Range("F1").Value = ChrW(218) & "ltima respuesta"
+    ws.Range("G1").Value = ChrW(218) & "ltima correcci" & ChrW(243) & "n de la IA"
+    ws.Range("H1").Value = "Puntuaci" & ChrW(243) & "n LTI"
+    EstiloCabecera ws.Range("A1:H1")
     ws.Rows(1).RowHeight = 30
 
     If n > 0 Then
-        ReDim datos(1 To n, 1 To 6)
+        ReDim datos(1 To n, 1 To 8)
         For i = 1 To n
-            datos(i, 1) = TextoParaCelda(m_res(i - 1).Usuario)
-            datos(i, 2) = TextoParaCelda(m_res(i - 1).Enunciado)
-            datos(i, 3) = m_res(i - 1).Envios
-            datos(i, 4) = TextoParaCelda(m_res(i - 1).Nota)
-            datos(i, 5) = TextoParaCelda(m_res(i - 1).Respuesta)
-            datos(i, 6) = TextoParaCelda(m_res(i - 1).Correccion)
+            datos(i, 1) = TextoParaCelda(m_res(i - 1).Problema)
+            datos(i, 2) = TextoParaCelda(m_res(i - 1).Usuario)
+            datos(i, 3) = TextoParaCelda(m_res(i - 1).Enunciado)
+            datos(i, 4) = m_res(i - 1).Envios
+            datos(i, 5) = TextoParaCelda(m_res(i - 1).Nota)
+            datos(i, 6) = TextoParaCelda(m_res(i - 1).Respuesta)
+            datos(i, 7) = TextoParaCelda(m_res(i - 1).Correccion)
+            If m_res(i - 1).TieneLti Then datos(i, 8) = m_res(i - 1).Lti      ' sin linea LTI: la celda queda vacia
         Next i
-        ws.Range("A2").Resize(n, 6).Value = datos
+        ws.Range("A2").Resize(n, 8).Value = datos
     End If
     ultima = n + 1
 
-    ws.Columns("A").ColumnWidth = 22
-    ws.Columns("B").ColumnWidth = 55
-    ws.Columns("C").ColumnWidth = 11
-    ws.Columns("D").ColumnWidth = 12
-    ws.Columns("E").ColumnWidth = 55
-    ws.Columns("F").ColumnWidth = 90
+    ws.Columns("A").ColumnWidth = 38
+    ws.Columns("B").ColumnWidth = 18
+    ws.Columns("C").ColumnWidth = 55
+    ws.Columns("D").ColumnWidth = 11
+    ws.Columns("E").ColumnWidth = 12
+    ws.Columns("F").ColumnWidth = 55
+    ws.Columns("G").ColumnWidth = 90
+    ws.Columns("H").ColumnWidth = 14
     If n > 0 Then
-        With ws.Range("A2:F" & ultima)
+        With ws.Range("A2:H" & ultima)
             .VerticalAlignment = xlTop
             .WrapText = True
         End With
-        ws.Range("C2:D" & ultima).HorizontalAlignment = xlCenter
+        ws.Range("D2:E" & ultima).HorizontalAlignment = xlCenter
+        ws.Range("H2:H" & ultima).HorizontalAlignment = xlCenter
         ws.Rows("2:" & ultima).RowHeight = 90                 ' filas compactas; el texto completo esta en la celda
     End If
 
-    ws.Range("A1:F" & ultima).AutoFilter
+    ws.Range("A1:H" & ultima).AutoFilter
     ws.Activate
     ActiveWindow.FreezePanes = False
-    ws.Range("B2").Select
+    ws.Range("C2").Select                                     ' fija la cabecera y las columnas Problema e Identificacion
     ActiveWindow.FreezePanes = True
     ws.Range("A1").Select
 End Sub

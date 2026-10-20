@@ -44,7 +44,8 @@ It is **opt-in** (`saveToLms: false` by default) and needs **no change on the Py
 | `jschannel.js` | web root, next to `jsinput_store.html` | Mozilla jschannel (**not included**, see below) |
 | `openedx/problem-store-corrections.xml` | Studio, problem **advanced editor** | The jsinput problem |
 | `openedx/expandir_respuestas.py` | instructor's computer | Expands the downloaded report into one row per attempt |
-| `openedx/excel/ResumenOpenEdX.bas` | instructor's computer (Excel for Windows) | VBA macro: one row per student from the downloaded report, see "Excel summary" |
+| `openedx/excel/ResumenOpenEdX.bas` | instructor's computer (Excel for Windows) | VBA macro: one row per correction (student and problem) from the downloaded report, see "Excel summary" |
+| `Resumen_informe_OpenEdX.xlsm` | **Releases** page (not in the tree) | Ready-made workbook with the macro and a button; same code as the `.bas` |
 | `openedx/test-puente-lms.html` | web root, **temporarily** | Test page that simulates a correction (no LLM needed) |
 
 > `openedx/` is deliberately not copied by `deploy_to_server.sh` (it only copies `*.html`,
@@ -184,49 +185,78 @@ student) that is copied as is, so the output can be very large: delete that colu
 
 Open edX also keeps a snapshot of every submission in the student's state history.
 
-### Excel summary: one row per student (Windows)
+### Excel summary: one row per correction (Windows)
 
 `openedx/excel/ResumenOpenEdX.bas` is a VBA module that reads the *student state* CSV
-(`student_state_from_block-….csv`) and builds a sheet **"Resumen por alumno"** with one row per
-student:
+(`student_state_from_block-….csv`) of **one problem or of a whole section** and builds a sheet
+**"Resumen por alumno"** with one row per *corrections line*, that is, per student and per problem:
 
 | Column | Content |
 | :--- | :--- |
+| Problema | Name of the exercise: the path in `location` without the course name (first part) and without the component (last part), e.g. `Course unit 1 > Paper 2 - WRITING > Exercise 1.1` |
 | Identificación | Open edX username |
 | Enunciado | Task statement of the last submission |
 | Nº de envíos | Number of corrections stored (it can be 1 less than Open edX's `attempts`, which also counts clicks on Submit without a correction) |
 | Última nota | Grade of the last correction as the AI returned it (e.g. `12/15`), stored as text so Excel does not turn it into a date |
 | Última respuesta | The student's text in the last submission |
 | Última corrección de la IA | The AI feedback for that submission |
+| Puntuación LTI | `module_score` of the LTI component line of the **same student and the same exercise** (the points the LMS holds). Empty if the report has no such line or no score |
 
-"Last" is the submission with the most recent `fecha`, not the one listed last. If a student appears
-twice, the record with the most recent submission is kept. Records that cannot be read (no answer
-stored, no submissions, damaged JSON) are listed in an **"Incidencias"** sheet with the reason and, for
-errors, the failing step and position. Both sheets are replaced on every run.
+**Which lines are used.** A section report mixes block types. Only two kinds of line are used:
+
+* **Corrections lines**: the `Respuesta` cell holds the stored history (it contains `intentos`) with at
+  least one submission. Every one of them becomes a row; students are *not* grouped, so a student with
+  three exercises gets three rows.
+* **LTI lines**: `block_key` of type `lti_consumer` (or `lti`). Its score is attached to the corrections
+  line with the same student and the same exercise path. If an exercise has two LTI components, the last one is used.
+
+Everything else is ignored without an incident: other kinds of problem, a store the student opened but
+never used, a store with an empty list. The **"Incidencias"** sheet only lists a line that looks like a
+corrections line but cannot be read, with the reason and the failing step and position. Both sheets are
+replaced on every run. "Last" is the submission with the most recent `fecha`, not the one listed last.
+Comparing *Última nota* with *Puntuación LTI* shows grades that never reached the LMS (a grade of 2/5 on an
+LTI component of weight 10 is shown as 4.0).
 
 **Why a macro and not just opening the CSV in Excel:** the `Respuesta` cell holds the student's whole
 history as JSON and can exceed 32,767 characters, the limit of an Excel cell, so Excel would silently
 truncate it. The macro reads the file itself (UTF-8, quoted fields with embedded line breaks) and never
 builds the huge `state` column.
 
-**Install** (once): create a new workbook, press `Alt+F11`, *File → Import File…*, choose
-`ResumenOpenEdX.bas`, and save the workbook as *Excel Macro-Enabled Workbook (.xlsm)*.
-**Use:** `Alt+F8` → `ImportarInformeOpenEdX` (or assign it to a button) → pick the CSV.
+**Option A: ready-made workbook (easiest).** Download `Resumen_informe_OpenEdX.xlsm` from the
+[Excel summary release](https://github.com/moocupv/lti-ai-grader/releases/tag/excel-v1.0). It contains the
+same macro as `ResumenOpenEdX.bas` and a button on the *Inicio* sheet. Windows blocks the macros of files
+downloaded from the internet, so **before opening it**: right-click the file → *Properties* → tick
+**Unblock** → *OK* (or run `Unblock-File .\Resumen_informe_OpenEdX.xlsm` in PowerShell). Then open it, click
+*Enable Content* and press **Importar informe de Open edX…**. Each release lists the SHA-256 of the file;
+compare it with `Get-FileHash .\Resumen_informe_OpenEdX.xlsm` (PowerShell) or
+`certutil -hashfile Resumen_informe_OpenEdX.xlsm SHA256` (Command Prompt).
+
+**Option B: import the source (you can read it first).** Create a new workbook, press `Alt+F11`,
+*File → Import File…*, choose `ResumenOpenEdX.bas`, and save the workbook as
+*Excel Macro-Enabled Workbook (.xlsm)*. This needs no unblocking, because the code is imported into a
+workbook of your own. Run it with `Alt+F8` → `ImportarInformeOpenEdX` (or assign it to a button) → pick the CSV.
 
 Notes:
 
 * Requires **Excel for Windows** (it reads the file with `ADODB.Stream`). Everything runs locally.
-* The `.xlsm` is intentionally not committed: a binary cannot be reviewed in a diff. The `.bas` is the
-  source. It must stay in Windows-1252 with CRLF line endings; `.gitattributes` keeps Git from converting it.
+* The `.xlsm` is intentionally not committed to the tree: a binary cannot be reviewed in a diff and every
+  version would stay in the history for good. It is published as an asset of a GitHub Release instead.
+  The `.bas` is the source. The VBA editor imports it as Windows-1252 text with **CRLF** line endings, so `.gitattributes`
+  makes Git store it with LF (clean diffs) and always check it out with CRLF, on every platform.
 * A student text that starts with `=`, `+`, `-` or `@` is prefixed with a space so Excel never treats
   it as a formula. Texts longer than 32,000 characters are truncated with a visible note.
-* Processing time grows with the size of the report: 83 s for a synthetic 190 MB report (120 students) in the
-  LibreOffice Basic test environment, about 0.45 s per MB. Excel's own speed may differ.
+* **Speed** depends mostly on the size of the stored answers, not on the size of the CSV. In the
+  LibreOffice Basic test environment, the huge `state` column is skipped at about 0.3 s per MB and the
+  `Respuesta` text is analysed at about 8 s per MB. A section report with 100 students × 5 exercises
+  (28 MB, 424 corrections lines, 7.7 MB of answers) took 66 s there. Excel's own speed has not been measured.
 * **Testing.** The parsing core was run in an independent Basic interpreter (LibreOffice) and compared
-  character by character with a separate Python implementation on eight files: a real report and
-  synthetic ones with emojis, odd JSON escapes, CR/LF/CRLF endings, BOM, 40 columns, 150 students and
-  41 submissions in one student. The Excel layer (file dialog, sheets, formatting) has been run in
-  Excel on one real report with a single student; it has not been exercised with many students.
+  character by character with a separate Python implementation on twelve files: a real single-problem
+  report, a real section report, and synthetic ones (emojis, odd JSON escapes, CR/LF/CRLF endings, BOM,
+  40 columns, 150 students, 41 submissions in one student, LTI lines before and after their problem,
+  duplicated LTI lines, LTI without a usable score, other kinds of problem, damaged JSON). The Excel layer
+  (file dialog, sheets, formatting) has been run in Excel on a real section report with a single student
+  (and, with the previous version of the macro, on a single-problem report). It has not been exercised
+  with many students.
 
 ## Troubleshooting
 
