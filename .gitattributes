@@ -1,0 +1,3 @@
+# VBA modules: the VBA editor imports them as Windows-1252 text with CRLF line endings.
+# Git must store and serve them byte for byte, so it never converts their line endings.
+*.bas -text
