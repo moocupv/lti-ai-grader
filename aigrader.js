@@ -1,5 +1,6 @@
 /**
- * 🛠️ AIGRADER ENGINE v2.7 (optional return of answer + AI correction to the LMS; feedback rendered as plain text)
+ * 🛠️ AIGRADER ENGINE v2.8 (waiting message with elapsed time and a tip; clear message on server timeout;
+ *                         optional return of answer + AI correction to the LMS; feedback rendered as plain text)
  */
 
 const EvaluatorEngine = {
@@ -9,6 +10,9 @@ const EvaluatorEngine = {
             ltiConnected: "🔗 <strong>LTI Mode:</strong> Your grade will be sent to the platform.",
             standalone: "ℹ️ <strong>Practice Mode:</strong> Results are not saved.",
             loading: "⏳ Analyzing your writing... please wait.",
+            elapsed: "Time elapsed:",
+            waitTip: "This usually takes one or two minutes, and sometimes longer (up to five). You can keep working in the meantime if you are in a computer: open the course in another browser tab, carry on with another activity and come back to this tab later to see the result. Please do not close or reload this tab, and do not leave this page in it. If you are using the evaluator from a mobile phone this may not work",
+            timeoutError: "The correction took too long and was cancelled by the server. Please try again in a few minutes.",
             evaluateBtn: "Evaluate",
             evaluatingBtn: "Evaluating...",
             newBtn: "New Evaluation",
@@ -24,6 +28,9 @@ const EvaluatorEngine = {
             ltiConnected: "🔗 <strong>Modo LTI:</strong> Tu nota se enviará a la plataforma.",
             standalone: "ℹ️ <strong>Modo Práctica:</strong> Los resultados no se guardan.",
             loading: "⏳ Analizando tu texto... por favor espera.",
+            elapsed: "Tiempo transcurrido:",
+            waitTip: "Suele tardar uno o dos minutos y a veces más (hasta cinco en algunos casos). Mientras tanto puedes seguir con el curso si estás trabajando en un ordenador: abre el curso en otra pestaña del navegador, continúa con otra actividad y vuelve a esta pestaña pasado un rato para ver el resultado. No cierres ni recargues esta pestaña, ni cambies de página en ella. Esto puede no funcionar desde un móvil.",
+            timeoutError: "La corrección ha tardado demasiado y el servidor la ha cancelado. Inténtalo de nuevo dentro de unos minutos.",
             evaluateBtn: "Evaluar",
             evaluatingBtn: "Evaluando...",
             newBtn: "Nueva Evaluación",
@@ -39,6 +46,9 @@ const EvaluatorEngine = {
             ltiConnected: "🔗 <strong>Mode LTI:</strong> La teua nota s'enviarà a la plataforma.",
             standalone: "ℹ️ <strong>Mode Pràctica:</strong> Els resultats no es guarden.",
             loading: "⏳ Analitzant el teu text... per favor espera.",
+            elapsed: "Temps transcorregut:",
+            waitTip: "Sol tardar un o dos minuts i, de vegades, més (fins a cinc). Mentrestant pots continuar amb el curs si estàs treballant en un ordinador: obri el curs en una altra pestanya del navegador, continua amb una altra activitat i torna a esta pestanya passat un temps per a vore el resultat. No tanques ni recarregues esta pestanya, ni canvies de pàgina en ella. En un telèfon mòbil pot no funcionar.",
+            timeoutError: "La correcció ha tardat massa i el servidor l'ha cancel·lada. Torna-ho a provar d'ací a uns minuts.",
             evaluateBtn: "Avaluar",
             evaluatingBtn: "Avaluant...",
             newBtn: "Nova Avaluació",
@@ -73,6 +83,8 @@ const EvaluatorEngine = {
             .error { background: #fce8e6; color: #c5221f; border-color: #fad2cf; }
             .success { border-top: 5px solid #34a853;background-color: #e8f5e9;color: #1b5e20;border: 1px solid #c3e6cb; }
             .loading { display: none; color: #5f6368; font-weight: 500; margin-top: 15px; }
+            .loading .loading-time { font-weight: 400; margin-top: 6px; font-variant-numeric: tabular-nums; }
+            .loading .loading-tip { font-weight: 400; font-size: 0.92em; margin-top: 10px; padding: 8px 12px; background: #fff8e1; border-left: 4px solid #f9ab00; border-radius: 4px; color: #4a4a4a; }
             #privacy-footer { margin-top: 50px; padding-top: 20px; border-top: 1px solid #eee; text-align: center; font-size: 13px; }
             a { color: #1a73e8; text-decoration: none; } a:hover { text-decoration: underline; }
         </style>
@@ -135,7 +147,7 @@ const EvaluatorEngine = {
         document.getElementById('ui-label-input').innerText = this.txt.labelInput;
         document.getElementById('evaluate-btn').innerText = this.txt.evaluateBtn;
         document.getElementById('new-eval-btn').innerText = this.txt.newBtn;
-        document.getElementById('loading').innerText = this.txt.loading;
+        this.buildLoadingBox();
         document.getElementById('student-input').value = CONFIG.initialValue;
 
         if (CONFIG.privacyUrl) {
@@ -156,7 +168,47 @@ const EvaluatorEngine = {
         }
     },
 
+    // Waiting box: message, elapsed time and a tip. Built with textContent (no HTML from the dictionary).
+    buildLoadingBox() {
+        const box = document.getElementById('loading');
+        box.textContent = '';
+        const parts = [['loading-main', this.txt.loading], ['loading-time', ''], ['loading-tip', this.txt.waitTip]];
+        parts.forEach(([cls, text]) => {
+            const div = document.createElement('div');
+            div.className = cls;
+            div.textContent = text;
+            box.appendChild(div);
+        });
+    },
+
+    // The timer is computed from timestamps, so it stays right when the browser throttles a background tab.
+    startWaitTimer() {
+        this.stopWaitTimer();
+        this.loadingSince = Date.now();
+        this.updateWaitTimer();
+        this.waitTimerId = setInterval(() => this.updateWaitTimer(), 1000);
+    },
+
+    stopWaitTimer() {
+        if (this.waitTimerId) {
+            clearInterval(this.waitTimerId);
+            this.waitTimerId = null;
+        }
+    },
+
+    updateWaitTimer() {
+        const el = document.querySelector('#loading .loading-time');
+        if (!el) return;
+        const total = Math.max(0, Math.floor((Date.now() - this.loadingSince) / 1000));
+        el.textContent = this.txt.elapsed + ' ' + Math.floor(total / 60) + ':' + String(total % 60).padStart(2, '0');
+    },
+
     bindEvents() {
+        // When the student comes back to this tab, refresh the elapsed time at once
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden && this.waitTimerId) this.updateWaitTimer();
+        });
+
         // Form handler
         document.getElementById('evaluation-form').addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -179,6 +231,10 @@ const EvaluatorEngine = {
                     })
                 });
 
+                if (resp.status === 504) {            // the server gave up waiting for the AI
+                    this.showFeedback(this.txt.timeoutError, false);
+                    return;                           // "finally" below still hides the waiting box
+                }
                 const rawText = await resp.text();
                 const start = rawText.indexOf('{');
                 const end = rawText.lastIndexOf('}') + 1;
@@ -226,6 +282,7 @@ const EvaluatorEngine = {
         btn.disabled = isLoading;
         btn.innerText = isLoading ? this.txt.evaluatingBtn : this.txt.evaluateBtn;
         document.getElementById('loading').style.display = isLoading ? 'block' : 'none';
+        if (isLoading) this.startWaitTimer(); else this.stopWaitTimer();
     },
 
     showFeedback(content, isSuccess) {
