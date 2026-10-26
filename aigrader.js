@@ -11,7 +11,7 @@ const EvaluatorEngine = {
             standalone: "ℹ️ <strong>Practice Mode:</strong> Results are not saved.",
             loading: "⏳ Analyzing your writing... please wait.",
             elapsed: "Time elapsed:",
-            waitTip: "This usually takes one or two minutes, and sometimes longer (up to five). You can keep working in the meantime if you are in a computer: open the course in another browser tab, carry on with another activity and come back to this tab later to see the result. Please do not close or reload this tab, and do not leave this page in it. If you are using the evaluator from a mobile phone this may not work",
+            waitTip: "This usually takes one or two minutes, and sometimes longer (up to five). You can keep working in the meantime if you are on a computer: open the course in another browser tab, carry on with another activity and come back to this tab later to see the result. Please do not close or reload this tab, and do not leave this page in it. If you are using the evaluator from a mobile phone this may not work.",
             timeoutError: "The correction took too long and was cancelled by the server. Please try again in a few minutes.",
             evaluateBtn: "Evaluate",
             evaluatingBtn: "Evaluating...",
