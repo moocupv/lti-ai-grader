@@ -209,6 +209,14 @@ debug: false
 ### In the aigrader.js file:
 Variables i18n with the different translations of the text components of the html page and Template with the web page template.
 
+While a correction is being generated, the page shows the elapsed time and a tip (`waitTip` in
+`i18n`, in English, Spanish and Valencian): it usually takes one or two minutes, the student can open
+the course in another tab and come back later, and must not close or reload the tab. The tip only
+holds while the tab stays open (a browser that puts the tab to sleep, or a phone, may cancel the
+request), and it says "one or two minutes", so adjust `waitTip` if your model is much slower or
+faster. If Nginx gives up on the evaluator (HTTP 504, its `fastcgi_read_timeout`) the page shows
+`timeoutError` instead of a connection error.
+
 ### In the Python (.py) file:
 ```python
 # Load .env file before defining CONFIG
