@@ -16,6 +16,7 @@ NGINX_LOG_DIR="${LTI_HEALTH_NGINX_LOG_DIR:-/var/log/nginx}"
 STATS_BIN="${LTI_HEALTH_STATS_BIN:-/usr/local/sbin/lti-health-log-stats.py}"
 MAIL_BIN="${LTI_HEALTH_MAIL_BIN:-/usr/local/sbin/lti-health-send-mail.py}"
 AI_EVENTS_BIN="${LTI_HEALTH_AI_EVENTS_BIN:-/usr/local/sbin/lti-health-ai-events.py}"
+WATCHDOG_BIN="${LTI_HEALTH_WATCHDOG_BIN:-/usr/local/sbin/lti-health-watchdog.sh}"
 
 note() {
     echo "$*"
@@ -138,6 +139,10 @@ done
         echo -n "Maximum receiver socket Recv-Q: "
         awk -F, '{if($11>m)m=$11} END{print m+0}' "$TMP_METRICS"
     fi
+
+    echo
+    echo "---------------- TLS CERTIFICATE ----------------"
+    "$WATCHDOG_BIN" --tls-summary 2>&1 || echo "Could not check the TLS certificate."
 
     echo
     echo "---------------- NGINX EVENTS ----------------"

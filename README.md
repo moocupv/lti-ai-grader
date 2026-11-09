@@ -209,6 +209,14 @@ debug: false
 ### In the aigrader.js file:
 Variables i18n with the different translations of the text components of the html page and Template with the web page template.
 
+While a correction is being generated, the page shows the elapsed time and a tip (`waitTip` in
+`i18n`, in English, Spanish and Valencian): it usually takes one or two minutes, the student can open
+the course in another tab and come back later, and must not close or reload the tab. The tip only
+holds while the tab stays open (a browser that puts the tab to sleep, or a phone, may cancel the
+request), and it says "one or two minutes (up to five)", which matches Nginx’s 300 s evaluator timeout, so adjust `waitTip` if your model is much slower or
+faster. If Nginx gives up on the evaluator (HTTP 504, its `fastcgi_read_timeout`) the page shows
+`timeoutError` instead of a connection error.
+
 ### In the Python (.py) file:
 ```python
 # Load .env file before defining CONFIG
@@ -372,7 +380,7 @@ lti-health-sample.timer      # sample every 30 seconds
 lti-health-daily.timer       # daily report at 00:10
 lti-health-weekly.timer      # weekly report every Monday at 08:00
 lti-health-ai-watch.timer    # AI provider alert check every 5 minutes
-lti-health-watchdog.timer    # health check every hour
+lti-health-watchdog.timer    # health check every 5 minutes
 ```
 
 Monthly raw metrics are stored in:
@@ -404,6 +412,51 @@ timestamp,load1,mem_available_mb,disk_used_pct,evaluators,oldest_evaluator_sec,l
 ```
 
 The watchdog checks that the sampling and daily timers are active, both fcgiwrap pools are available, the latest sample is fresh, root filesystem usage is below the configured threshold, and yesterday's report exists after 02:00. It only sends a new alert when the detected problem changes, and sends a recovery message when monitoring becomes healthy again.
+
+#### Watchdog alerts: certificate, nginx, memory and load
+
+Besides those checks, the watchdog (every 5 minutes) looks at four things that the other reports only
+show afterwards. Two outages are the reason: a certificate that expired and kept the activities
+unreachable for almost two days without anyone noticing, and a memory exhaustion caused by building a
+Docker image on the same machine.
+
+| Alert | How it is detected | Default |
+| :--- | :--- | :--- |
+| Certificate about to expire | Connects to the HTTPS port and reads the certificate that is really **served** (not only the file on disk) | One e-mail when fewer than 21 days are left, then one per day when fewer than 7, and one when expired |
+| Certificate does not verify | Chain and host name, as seen from the server (`TLS_VERIFY=0` turns it off for a private CA) | Alert |
+| File renewed but not served | The certificate on the HTTPS port differs from `CERT_FILE` and the file is older than 10 minutes (nginx was not reloaded) | Alert |
+| Nginx not answering | Nothing listens on the port, or no TLS handshake | Alert after 2 consecutive checks (5 minutes apart), so a reload does not trigger it |
+| Low memory | `mem_available_mb` in the metrics CSV | Below 300 MB in 4 or more samples within the last 15 minutes |
+| High load | `load1` in the metrics CSV | Above 20 in 4 or more samples within the last 15 minutes (`LOAD_ALERT=0` disables it) |
+
+The certificate and nginx checks stay **off until `TLS_HOST` is set** in `/etc/lti-health/mail.env`; the
+resource alerts are always on. All the settings, with their defaults, are listed in
+`mail.env.example`:
+
+```bash
+sudo nano /etc/lti-health/mail.env      # TLS_HOST=yourserver.com and CERT_FILE=/path/to/fullchain.pem
+```
+
+An e-mail is sent only when the list of problems changes. Each problem is a fixed sentence, and the
+figures (days left, lowest memory, fingerprints) go in a separate "Details" part that is **not**
+compared, so a worsening episode does not send a second e-mail. To see what the watchdog would report
+now, without sending anything or changing any state (an nginx failure is shown at the first check):
+
+```bash
+sudo env LTI_HEALTH_DRYRUN=1 TLS_HOST=yourserver.com CERT_FILE=/path/to/fullchain.pem /usr/local/sbin/lti-health-watchdog.sh
+sudo env TLS_HOST=yourserver.com /usr/local/sbin/lti-health-watchdog.sh --tls-summary   # the line shown in the weekly report
+```
+
+If nginx listens only on the public address, set `TLS_CONNECT` to it (the default is `127.0.0.1`). The
+weekly report has a **TLS CERTIFICATE** section with the date and the days left, so it is visible
+without waiting for an alert.
+
+Limits: the watchdog runs on the same machine, so it cannot warn in real time while that machine is hung
+(the sampler itself stops), and the alert would arrive once it recovers. The only thing that sees an
+outage as a student does is a check from **another machine**; if your institution has an external
+monitor (Zabbix, Nagios, Uptime Kuma...), have it watch the HTTPS address and the certificate as well.
+Renewing a certificate needs: the new file in place, `nginx -t && sudo systemctl reload nginx`, and a
+check of what is served (`openssl s_client -connect yourserver.com:443 -servername yourserver.com`).
 
 ### Weekly email configuration
 
@@ -464,6 +517,7 @@ sudo tail /var/log/lti-health/metrics-$(date +%Y-%m).csv
 sudo cat "$(ls -1t /var/log/lti-health/report-*.txt | head -1)"
 sudo systemctl start lti-health-watchdog.service
 sudo journalctl -u lti-health-watchdog.service -n 30 --no-pager
+sudo env LTI_HEALTH_DRYRUN=1 TLS_HOST=yourserver.com /usr/local/sbin/lti-health-watchdog.sh   # what it would report now
 ```
 
 To test the Nginx usage parser for a specific day:
@@ -541,3 +595,9 @@ python3 -m unittest discover -s tests -v
 ```
 
 It guards against a bug that made about one grade in three fail: the OAuth parameters were percent-encoded with `urllib.parse.quote()`, which leaves `/` unencoded, so whenever the base64 `oauth_body_hash` contained a `/` Open edX computed a different signature and answered HTTP 500 (`OAuth signature verification has failed`). The grade never reached the gradebook, and the evaluator still showed the correction to the student. In the `lms_grade_failed` events this appears as `reason=http_error code=500`.
+
+`tests/test_watchdog.py` checks the monitoring watchdog against **real certificates** served by a local `openssl s_server`: a healthy server, a certificate with 15, 4 and 0 days left (one e-mail at each stage, not one per run), a renewed file that nginx did not reload, nginx down (only reported after two consecutive checks), a certificate that does not verify, low memory and high load from a synthetic metrics file, the dry-run mode and the weekly report section. It uses a fake mailer and a temporary directory, so nothing is sent. It needs `openssl` and `pip install cryptography`:
+
+```bash
+python3 tests/test_watchdog.py
+```
