@@ -17,7 +17,10 @@ from urllib.parse import parse_qs
 DEBUG = False
 REDIRECT_URL = '/C1-writing-correction-LTI.html' # Default destination
 SESSION_DIR = '/var/secure/lti_sessions'
-SESSION_TIMEOUT = 3600
+# Seconds a session file lives without being used. aigrader.py renews it every time the student
+# evaluates, so this is the longest a student can leave the activity untouched before the first
+# correction (or between two of them) without losing the grade.
+SESSION_TIMEOUT = 28800
 
 # LTI Allowed origins
 ALLOWED_ORIGINS = [

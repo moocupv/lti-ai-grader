@@ -182,7 +182,7 @@ The system uses a highly flexible entry point. Instead of hardcoding which exam 
 DEBUG = False
 REDIRECT_URL = '/B2-writing-correction-LTI.html' # default destination
 SESSION_DIR = '/var/secure/lti_sessions'
-SESSION_TIMEOUT = 3600
+SESSION_TIMEOUT = 28800   # seconds a session lives unused; aigrader.py renews it on every correction
 
 # LTI allowed domains
 ALLOWED_ORIGINS = [
@@ -539,7 +539,7 @@ The evaluator CGI scripts always answer HTTP 200, even when the AI provider fail
 | `ai_ok` | The provider answered (with the response time in `ms`) |
 | `ai_error` | The call failed: HTTP error (with the provider's own message), timeout, no connection, malformed answer |
 | `no_grade` | The model answered but without the grade line (nothing is sent to the LMS) |
-| `lms_grade_failed` | The grade could not be delivered to the LMS. The event carries a `reason`: `url_without_domain` (relative outcome URL, typical of launches from Studio), `no_outcome_url`, `url_not_https`, `domain_not_allowed` (with the domain), `no_secret` (with the consumer key), `http_error` (with the code and the LMS message), `unexpected_status`, `lms_reported_failure` (HTTP 200 but the LMS reports failure) or `exception` |
+| `lms_grade_failed` | The grade could not be delivered to the LMS. The event carries a `reason`: `url_without_domain` (relative outcome URL, typical of launches from Studio), `no_outcome_url`, `no_session` (the launch session had expired, so the outcome URL was unknown), `url_not_https`, `domain_not_allowed` (with the domain), `no_secret` (with the consumer key), `http_error` (with the code and the LMS message), `unexpected_status`, `lms_reported_failure` (HTTP 200 but the LMS reports failure) or `exception` |
 | `session_missing` | A session token was sent but its session file does not exist |
 | `cgi_error` | Unexpected error in the grader |
 
@@ -601,3 +601,5 @@ It guards against a bug that made about one grade in three fail: the OAuth param
 ```bash
 python3 tests/test_watchdog.py
 ```
+
+`tests/test_session_renewal.py` covers how the LTI session is handled: the session file is read **before** the AI call (so a correction that takes minutes cannot lose it if the receiver's cleanup runs meanwhile), it is renewed every time it is used, a missing or damaged file is reported as `lms_grade_failed` with the reason `no_session`, and a token cannot point outside the session directory. It also checks the receiver's cleanup. It runs with the rest (`python3 -m unittest discover -s tests -v`).

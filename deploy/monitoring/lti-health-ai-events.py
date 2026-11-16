@@ -41,6 +41,7 @@ DEFAULT_ERROR_LOGS = "/var/log/nginx/error.log*"
 LMS_FAILURE_MEANING = {
     "url_without_domain": "outcome URL has no domain (typical of launches from Studio, which has no gradebook)",
     "no_outcome_url": "the LTI launch carried no outcome URL (component not scored?)",
+    "no_session": "the LTI session had expired or was missing, so the outcome URL was unknown",
     "url_not_https": "outcome URL is not https",
     "domain_not_allowed": "domain not in LTI_ALLOWED_DOMAINS",
     "url_invalid": "outcome URL could not be parsed",

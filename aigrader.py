@@ -231,6 +231,34 @@ def call_ai_api(student_input, config):
                   ms=int((time.monotonic() - started) * 1000), detail=detail or str(e))
         return {'success': False, 'error': str(e)}
 
+def load_lti_session(session_token, config):
+    """Reads the LTI session saved by lti-receiver.py and renews it. Returns (lti_params, found).
+
+    The session file holds the outcome URL and the result id needed to return the grade to the LMS. The
+    receiver deletes any session that has not been modified for SESSION_TIMEOUT, so:
+    * it is read BEFORE the AI call: a correction can take minutes and the file could expire meanwhile;
+    * its modification time is refreshed, so a student who keeps working keeps the session alive.
+    A missing, unreadable or damaged file counts as "not found" (the correction is still returned).
+    """
+    session_dir = config.get("session_dir")
+    if not session_token or not session_dir:
+        return {}, False
+    base = os.path.abspath(session_dir)
+    session_path = os.path.normpath(os.path.join(base, f"{session_token}.json"))
+    if not session_path.startswith(base + os.sep):      # the token must not point outside the directory
+        return {}, False
+    try:
+        with open(session_path, 'r') as f:
+            session_data = json.load(f)
+    except (OSError, ValueError):
+        return {}, False
+    try:
+        os.utime(session_path, None)
+    except OSError:
+        pass
+    lti_params = session_data.get('lti_params', {}) if isinstance(session_data, dict) else {}
+    return lti_params, True
+
 def run(config):
     setup_environment(config.get("DEBUG", False))
 
@@ -270,6 +298,8 @@ def run(config):
             }, ensure_ascii=False))
             return
 
+        lti_params, session_found = load_lti_session(session_token, config)
+
         result = call_ai_api(student_input, config)
 
         if result.get('success'):
@@ -280,22 +310,19 @@ def run(config):
                 log_event("no_grade", model=config.get("model_name"))
 
             if session_token and score is not None:
-                token_file = f"{session_token}.json"
-                session_path = os.path.normpath(os.path.join(config["session_dir"], token_file))
-                if session_path.startswith(os.path.abspath(config["session_dir"])) and os.path.exists(session_path):
-                    with open(session_path, 'r') as f:
-                        session_data = json.load(f)
-                    lti_params = session_data.get('lti_params', {})
-                    if config.get("send_grade_to_lms") and lti_params:
-                        grade_sent = send_grade_to_lti(
-                            lti_params.get('lis_outcome_service_url'),
-                            lti_params.get('lis_result_sourcedid'),
-                            lti_params.get('oauth_consumer_key'),
-                            score/maximum if maximum > 0 else 0,
-                            config
-                        )
-                else:
+                if not session_found:
                     log_event("session_missing")
+                    if config.get("send_grade_to_lms"):
+                        # Counted with the other grades that did not reach the LMS in the health reports.
+                        log_event("lms_grade_failed", reason="no_session")
+                elif config.get("send_grade_to_lms") and lti_params:
+                    grade_sent = send_grade_to_lti(
+                        lti_params.get('lis_outcome_service_url'),
+                        lti_params.get('lis_result_sourcedid'),
+                        lti_params.get('oauth_consumer_key'),
+                        score/maximum if maximum > 0 else 0,
+                        config
+                    )
 
             sys.stdout.write(json.dumps({
                 'success': True, 'feedback': feedback,
