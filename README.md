@@ -215,7 +215,9 @@ the course in another tab and come back later, and must not close or reload the 
 holds while the tab stays open (a browser that puts the tab to sleep, or a phone, may cancel the
 request), and it says "one or two minutes (up to five)", which matches Nginx’s 300 s evaluator timeout, so adjust `waitTip` if your model is much slower or
 faster. If Nginx gives up on the evaluator (HTTP 504, its `fastcgi_read_timeout`) the page shows
-`timeoutError` instead of a connection error.
+`timeoutError` instead of a connection error, and it does the same when the evaluator itself gives up waiting for the AI
+(`api_timeout`): the service then answers with `error_code: "ai_timeout"` next to the technical text, and the page replaces that
+text, which is in English, with the message in the student's language.
 
 ### In the Python (.py) file:
 ```python
@@ -545,10 +547,12 @@ The evaluator CGI scripts always answer HTTP 200, even when the AI provider fail
 
 Events never contain the student's text, and API keys or bearer tokens that appear in an error message are masked. The daily and weekly reports get an **AI PROVIDER** section: calls, errors and error rate, grades not delivered to the LMS grouped by reason, errors grouped by cause, a table by evaluator script, response times (median, p95, maximum) and, in the weekly report, a day-by-day table.
 
-`lti-health-ai-watch.timer` runs `lti-health-ai-events.py watch` every 5 minutes. When the last **3** AI calls in a row failed (all within the last **30** minutes) it sends **one** e-mail with the most recent error, the evaluators affected and the last successful call, and it sends **one more** when a call succeeds again. Failures mixed with successful calls do not trigger it, and it does not repeat while the outage continues. If the e-mail cannot be sent, the service ends with an error and tries again on the next run. Without SMTP configured nothing is sent, and the message is only saved in `/var/log/lti-health/ai-alert.txt`. The thresholds can be changed in `/etc/lti-health/mail.env`:
+`lti-health-ai-watch.timer` runs `lti-health-ai-events.py watch` every 5 minutes. It sends **one** e-mail, with the most recent error, the failures by cause, the evaluators affected and the last successful call, in either of two cases, always within the last **30** minutes: the last **3** AI calls in a row failed (the provider is down), or at least **3** of the last **8** calls failed even with successful calls in between (the provider fails intermittently, which the first rule never sees). It sends **one more** when the provider answers again: at the first successful call after an outage, and, after intermittent failures, once fewer than 3 of the last 8 calls fail (a single lucky success in the middle of failures does not end the alert). After a "recovered" message the failures already reported are not counted again, and nothing is repeated while the problem continues. If the e-mail cannot be sent, the service ends with an error and tries again on the next run. Without SMTP configured nothing is sent, and the message is only saved in `/var/log/lti-health/ai-alert.txt`. The thresholds can be changed in `/etc/lti-health/mail.env`:
 
 ```text
 AI_ALERT_CONSECUTIVE=3
+AI_ALERT_RATE_FAILS=3      # 0 turns the intermittent-failure rule off
+AI_ALERT_RATE_OF=8
 AI_ALERT_WINDOW_MIN=30
 ```
 
@@ -603,3 +607,9 @@ python3 tests/test_watchdog.py
 ```
 
 `tests/test_session_renewal.py` covers how the LTI session is handled: the session file is read **before** the AI call (so a correction that takes minutes cannot lose it if the receiver's cleanup runs meanwhile), it is renewed every time it is used, a missing or damaged file is reported as `lms_grade_failed` with the reason `no_session`, and a token cannot point outside the session directory. It also checks the receiver's cleanup. It runs with the rest (`python3 -m unittest discover -s tests -v`).
+
+`tests/test_ai_watch.py` covers the e-mail alerts about the AI provider (both rules, recovery, no repeated mail, thresholds, state files from older versions) with a fake mailer, and `tests/test_ai_timeout.py` how `aigrader.py` reports an AI call that exceeded `api_timeout`:
+
+```bash
+python3 -m unittest tests.test_ai_watch tests.test_ai_timeout
+```

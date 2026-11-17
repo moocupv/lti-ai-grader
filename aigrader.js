@@ -1,5 +1,5 @@
 /**
- * 🛠️ AIGRADER ENGINE v2.8 (waiting message with elapsed time and a tip; clear message on server timeout;
+ * 🛠️ AIGRADER ENGINE v2.9 (clear message when the AI does not answer in time; waiting message with elapsed time and a tip;
  *                         optional return of answer + AI correction to the LMS; feedback rendered as plain text)
  */
 
@@ -242,7 +242,9 @@ const EvaluatorEngine = {
                 if (start === -1) throw new Error(this.txt.invalidResponseError);
 
                 const res = JSON.parse(rawText.substring(start, end));
-                this.showFeedback(res.success ? res.feedback : this.txt.serverError + res.error, res.success);
+                // error_code 'ai_timeout': the evaluator gave up waiting for the AI (api_timeout); show the clear text
+                const failure = res.error_code === 'ai_timeout' ? this.txt.timeoutError : this.txt.serverError + res.error;
+                this.showFeedback(res.success ? res.feedback : failure, res.success);
                 if (res.success) {
                     this.sendCorrectionToLms({
                         fullText: text,

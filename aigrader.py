@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import json
+import socket
 import sys
 import os
 import time
@@ -186,6 +187,17 @@ def send_grade_to_lti(outcome_url, result_sourcedid, consumer_key, score_normali
         log_event("lms_grade_failed", reason="exception", kind=type(e).__name__, detail=str(e))
         return False
 
+def _is_timeout(error):
+    """True when the AI call ended because the provider did not answer in time (api_timeout)."""
+    if isinstance(error, urllib.error.HTTPError):
+        return False                                    # the provider answered, with an error
+    if isinstance(error, (socket.timeout, TimeoutError)):
+        return True
+    if isinstance(getattr(error, "reason", None), (socket.timeout, TimeoutError)):   # URLError wrapping it
+        return True
+    return "timed out" in str(error).lower()
+
+
 def call_ai_api(student_input, config):
     provider = config.get("provider", "openai").lower()
     started = time.monotonic()
@@ -229,7 +241,10 @@ def call_ai_api(student_input, config):
         log_event("ai_error", provider=provider, model=config.get("model_name"),
                   kind=type(e).__name__, code=getattr(e, "code", None),
                   ms=int((time.monotonic() - started) * 1000), detail=detail or str(e))
-        return {'success': False, 'error': str(e)}
+        failure = {'success': False, 'error': str(e)}
+        if _is_timeout(e):
+            failure['error_code'] = 'ai_timeout'      # lets the page show a clear message instead of the raw text
+        return failure
 
 def load_lti_session(session_token, config):
     """Reads the LTI session saved by lti-receiver.py and renews it. Returns (lti_params, found).
@@ -330,7 +345,10 @@ def run(config):
                 'lti_notified': grade_sent
             }, ensure_ascii=False))
         else:
-            sys.stdout.write(json.dumps({'success': False, 'error': result.get('error')}))
+            answer = {'success': False, 'error': result.get('error')}
+            if result.get('error_code'):
+                answer['error_code'] = result['error_code']
+            sys.stdout.write(json.dumps(answer))
 
     except Exception as e:
         log_event("cgi_error", kind=type(e).__name__, detail=str(e))

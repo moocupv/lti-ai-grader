@@ -18,7 +18,10 @@ Usage:
 
 `watch` is meant to run every few minutes (lti-health-ai-watch.timer). It alerts when the last
 AI_ALERT_CONSECUTIVE (default 3) AI calls, all within the last AI_ALERT_WINDOW_MIN (default 30)
-minutes, failed, and sends one "recovered" message when a call succeeds again.
+minutes, failed (the provider is down), or when at least AI_ALERT_RATE_FAILS (default 3, 0 = off) of
+the last AI_ALERT_RATE_OF (default 8) calls in that window failed even with successes in between (the
+provider fails intermittently). It sends one "recovered" message when a call succeeds again and the
+second rule no longer holds.
 """
 
 import argparse
@@ -293,8 +296,15 @@ def describe(event):
     return f"{event.get('kind', '?')} {event.get('code', '')}".strip() + (f" - {detail[:300]}" if detail else "")
 
 
+def cause(event):
+    """Short cause of a failed call, for counting: exception kind and HTTP code."""
+    return f"{event.get('kind', '?')} {event.get('code', '')}".strip()
+
+
 def cmd_watch(args):
     needed = int(os.environ.get("AI_ALERT_CONSECUTIVE", "3"))
+    rate_fails = int(os.environ.get("AI_ALERT_RATE_FAILS", "3"))   # 0 turns the rate rule off
+    rate_of = int(os.environ.get("AI_ALERT_RATE_OF", "8"))
     window = timedelta(minutes=int(os.environ.get("AI_ALERT_WINDOW_MIN", "30")))
     log_dir = os.environ.get("LTI_HEALTH_LOG_DIR", "/var/log/lti-health")
     state_path = os.path.join(os.environ.get("LTI_HEALTH_STATE_DIR", "/var/lib/lti-health"), "ai-watch.state")
@@ -303,20 +313,44 @@ def cmd_watch(args):
 
     events = recent_events(args.error_log)
     state = load_state(state_path)
-    last_n = [e for e in events if now - e["_dt"] <= window][-needed:]
-    failing = len(last_n) >= needed and all(e["event"] == "ai_error" for e in last_n)
+    in_window = [e for e in events if now - e["_dt"] <= window]
+
+    # Rule 1: the last AI_ALERT_CONSECUTIVE calls all failed (the provider is down).
+    last_n = in_window[-needed:]
+    failing_run = len(last_n) >= needed and all(e["event"] == "ai_error" for e in last_n)
+    # Rule 2: at least AI_ALERT_RATE_FAILS of the last AI_ALERT_RATE_OF calls failed, even if successes are
+    # mixed in (the provider fails intermittently, which rule 1 never sees). After a "recovered" message the
+    # failures up to then no longer count, or they would raise the alert again at the next run.
+    ignore_before = datetime.fromisoformat(state["ignore_before"]) if state.get("ignore_before") else None
+    rate_events = [e for e in in_window if ignore_before is None or e["_dt"] > ignore_before]
+    recent = rate_events[-rate_of:]
+    recent_fails = [e for e in recent if e["event"] == "ai_error"]
+    failing_rate = rate_fails > 0 and len(recent_fails) >= rate_fails
+    failing = failing_run or failing_rate
     exit_code = 0
 
     if state.get("status") != "ALERT" and failing:
+        if failing_run:
+            evidence, failed, rule = last_n, last_n, "consecutive"
+            headline = (f"The last {len(last_n)} AI calls all failed "
+                        f"(first {last_n[0]['_dt']:%H:%M:%S}, last {last_n[-1]['_dt']:%H:%M:%S}).")
+            subject = f"ALERT: LTI AI Grader - AI provider failing ({len(last_n)} consecutive errors)"
+            impact = "Students currently get a server error instead of a correction."
+        else:
+            evidence, failed, rule = recent, recent_fails, "rate"
+            headline = (f"{len(recent_fails)} of the last {len(recent)} AI calls failed, with successes in between "
+                        f"(from {recent[0]['_dt']:%H:%M:%S} to {recent[-1]['_dt']:%H:%M:%S}): the provider is failing intermittently.")
+            subject = f"ALERT: LTI AI Grader - AI provider failing ({len(recent_fails)} of the last {len(recent)} calls)"
+            impact = "Some students get a server error instead of a correction."
         last_ok = next((e for e in reversed(events) if e["event"] == "ai_ok"), None)
-        scripts = Counter(e.get("script", "?") for e in last_n)
-        models = sorted({e.get("model", "?") for e in last_n})
+        scripts = Counter(e.get("script", "?") for e in evidence)
+        models = sorted({e.get("model", "?") for e in evidence})
+        causes = Counter(cause(e) for e in failed)
         lines = [
             f"LTI AI Grader: the AI provider is failing on {host}",
             f"Detected at {now:%Y-%m-%d %H:%M:%S %z}",
             "",
-            f"The last {len(last_n)} AI calls all failed "
-            f"(first {last_n[0]['_dt']:%H:%M:%S}, last {last_n[-1]['_dt']:%H:%M:%S}).",
+            headline,
         ]
         if last_ok:
             lines.append(f"Last successful call: {last_ok['_dt']:%Y-%m-%d %H:%M:%S}")
@@ -324,23 +358,23 @@ def cmd_watch(args):
             lines.append("No successful call found in the log tail.")
         lines += [
             "",
-            f"Most recent error: {describe(last_n[-1])}",
+            f"Most recent error: {describe(failed[-1])}",
+            f"Failures by cause: {', '.join(f'{c} ({n})' for c, n in causes.most_common())}",
             f"Model(s): {', '.join(models)}",
             f"Evaluators: {', '.join(f'{s} ({n})' for s, n in scripts.most_common())}",
             "",
-            "Students currently get a server error instead of a correction.",
+            impact,
             "Check the provider status and run, on the server:",
             "  sudo grep 'event=ai_error' /var/log/nginx/error.log | tail -5",
-            "You will get one more message when a call succeeds again.",
+            "You will get one more message when the provider answers again.",
         ]
         body = "\n".join(lines) + "\n"
-        sent = send_mail(f"ALERT: LTI AI Grader - AI provider failing ({len(last_n)} consecutive errors)",
-                         body, log_dir, args.dry_run)
+        sent = send_mail(subject, body, log_dir, args.dry_run)
         if sent is False:
             exit_code = 1  # keep the state: it will be retried at the next run
         elif not args.dry_run:
-            state = {"status": "ALERT", "since": last_n[0]["_dt"].isoformat(),
-                     "last_failure": last_n[-1]["_dt"].isoformat()}
+            state = {"status": "ALERT", "since": failed[0]["_dt"].isoformat(),
+                     "last_failure": failed[-1]["_dt"].isoformat(), "rule": rule}
             save_state(state_path, state)
 
     elif state.get("status") == "ALERT":
@@ -348,7 +382,12 @@ def cmd_watch(args):
         latest = events[-1] if events else None
         # ">=": timestamps have one-second resolution and the sort is stable, so an "ai_ok" that is the
         # last event in log order and shares the second of the last failure did happen after it.
-        if latest and latest["event"] == "ai_ok" and latest["_dt"] >= last_failure:
+        # An alert raised by the rate rule (intermittent failures) ends only when that rule no longer holds: one
+        # lucky success in the middle of failures must not send "recovered" and then alert again. An alert for
+        # consecutive failures (a clean outage) ends at the first success, as it always did. Older state files
+        # have no "rule": they behave as before.
+        still_failing = state.get("rule") == "rate" and failing_rate
+        if latest and latest["event"] == "ai_ok" and latest["_dt"] >= last_failure and not still_failing:
             since = datetime.fromisoformat(state["since"])
             errors = sum(1 for e in events if e["event"] == "ai_error" and e["_dt"] >= since)
             body = (
@@ -360,7 +399,10 @@ def cmd_watch(args):
             if sent is False:
                 exit_code = 1
             elif not args.dry_run:
-                save_state(state_path, {"status": "OK"})
+                # Ignore every failure logged so far, not only the last one the state remembers: errors that arrived
+                # between two runs are newer than it, and would count again for the rate rule.
+                newest_error = max((e["_dt"] for e in events if e["event"] == "ai_error"), default=last_failure)
+                save_state(state_path, {"status": "OK", "ignore_before": max(last_failure, newest_error).isoformat()})
         elif events and events[-1]["event"] == "ai_error" and events[-1]["_dt"] > last_failure and not args.dry_run:
             state["last_failure"] = events[-1]["_dt"].isoformat()  # still failing: remember the latest failure
             save_state(state_path, state)
